@@ -14,6 +14,11 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -fno-common -fno-builtin-printf \
           -specs=$(SPECS) -I$(COURSE_BENCH_DIR)
 LDFLAGS := -static -T $(LDSCRIPT)
 
+# make QUICK=1 builds smaller smoke-test workloads (use a separate OUTDIR).
+ifeq ($(QUICK),1)
+CFLAGS += -DQUICK
+endif
+
 AVAILABLE_BENCHES := reuse streaming stream_pollution capacity conflict phase_change mixed
 BENCHES ?= $(AVAILABLE_BENCHES)
 ELFS := $(addprefix $(OUTDIR)/,$(addsuffix .riscv,$(BENCHES)))

@@ -85,6 +85,15 @@ cat "$D/comparison.csv"
 
 If there are **no `L2WINDOW` lines**, the simulator is not printing hardware `printf` output. The runner passes `+permissive +verbose +permissive-off` (without the `+permissive` wrapper fesvr treats `+verbose` as the program name and fails with "could not open +verbose"). The per-instruction `C0:` trace that `+verbose` produces is filtered out of the saved logs.
 
+### Quick mode
+
+`QUICK=1` builds smaller workloads (1 MiB data set, which is still 2x the 512 KiB L2, and about 4x fewer repetitions) into `/workspace/output/replacement-benchmarks-quick`, so the full-size ELFs are left alone. Use it for smoke tests; the report header shows `Quick mode: 1`. Quick numbers must not be compared against full-size numbers.
+
+```bash
+QUICK=1 BASELINES=L2RandomReplacementConfig POLICIES=L2RoundRobinDemoReplacementConfig BENCHMARKS=reuse \
+  bash run-test-suite
+```
+
 ## 5. Full run
 
 ```bash

@@ -8,7 +8,13 @@ MICRO_BENCH_DIR="$PROJECT_DIR/benchmarks"
 SIM_DIR="${SIM_DIR:-$CHIPYARD_ROOT/sims/verilator}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/output}"
 RESULTS_DIR="${RESULTS_DIR:-$OUTPUT_DIR/replacement-suite-$(date +%Y%m%d-%H%M%S)}"
-BENCH_OUTPUT_DIR="${BENCH_OUTPUT_DIR:-$OUTPUT_DIR/replacement-benchmarks}"
+# QUICK=1 builds smaller workloads into their own folder, so full ELFs are not overwritten.
+QUICK="${QUICK:-0}"
+if [ "$QUICK" = "1" ]; then
+    BENCH_OUTPUT_DIR="${BENCH_OUTPUT_DIR:-$OUTPUT_DIR/replacement-benchmarks-quick}"
+else
+    BENCH_OUTPUT_DIR="${BENCH_OUTPUT_DIR:-$OUTPUT_DIR/replacement-benchmarks}"
+fi
 CACHE_REPO="${CACHE_REPO:-$CHIPYARD_ROOT/generators/rocket-chip-inclusive-cache}"
 CACHE_REVISION="85420cf26f9abcebf685f0d68d14189598943c19"
 REPLACEMENT_PATCH="$PROJECT_DIR/rocket-chip-inclusive-cache.patch"
@@ -90,6 +96,7 @@ fi
 benchmark_list="${BENCHMARKS//,/ }"
 if ! make -C "$MICRO_BENCH_DIR" \
     OUTDIR="$BENCH_OUTPUT_DIR" \
+    QUICK="$QUICK" \
     COURSE_BENCH_DIR="$BENCH_DIR" \
     BENCHES="$benchmark_list"; then
     echo "Microbenchmark build failed; no policy simulations were run." >&2
@@ -285,7 +292,7 @@ l2_geometry="$(cat "$OUTPUT_DIR"/l2-geometry-*.txt 2>/dev/null | head -1 \
 mkdir -p "$EXPORT_DIR" && python3 "$PROJECT_DIR/format_report.py" \
     "$comparison_file" "$metrics_file" \
     "Date:       $(date)" "L2 cache:   $l2_geometry" "Baselines:  $BASELINES" \
-    "Policies:   $POLICIES" "Benchmarks: $BENCHMARKS" > "$report_file"
+    "Policies:   $POLICIES" "Benchmarks: $BENCHMARKS" "Quick mode: $QUICK" > "$report_file"
 # Container-local results disappear with a --rm container, so keep a copy next to the report.
 cp -r "$RESULTS_DIR" "$EXPORT_DIR/run_${stamp}_files" 2>/dev/null
 echo "Report: $report_file"

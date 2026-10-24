@@ -24,8 +24,8 @@ simulation with the corrected `+permissive` flags is being validated; see
 | Round Robin demo (`RoundRobinDemo.scala`) | Fully implemented example to copy from |
 | PLRU, true LRU, BIP, DIP | **Stubs only** (fail elaboration with a clear message) |
 | L2 miss counter | Done (simulation-only, unverified) |
-| Seven microbenchmarks | Done (unbuilt) |
-| Master suite runner and report export | Done (unrun) |
+| Seven microbenchmarks (plus `QUICK=1` smaller variants) | Done; full size builds, quick mode untested |
+| Master suite runner and report export | Done; end-to-end run being validated |
 
 Key finding: the pinned InclusiveCache picks victims with an LFSR (random). It
 has **no PLRU**, so Random is the real baseline and PLRU is a separate policy
@@ -35,7 +35,7 @@ to implement.
 
 ```
 student-work/
-├── Wiki/Current Project State.md        this file
+├── Wiki/                                documentation (see "Wiki pages" below)
 └── l2-replacement/
     ├── rocket-chip-inclusive-cache.patch   interface, hooks, validation, L2 monitor
     ├── L2ReplacementConfigs.scala          the six configs
@@ -52,6 +52,19 @@ student-work/
     ├── run-and-export.ps1                  host script: run + write to Desktop
     └── compose.export.yaml                 compose override mounting the output folder
 ```
+
+## Wiki pages
+
+| Page | Read it for |
+|---|---|
+| `Current Project State.md` | This page: what is done, what is not |
+| `How to Run.md` | Commands to build, run and check the project (including quick mode) |
+| `How Chipyard Works.md` | How Chipyard, configs and generators fit together |
+| `How Make Files Work.md` | Reading the Makefiles used by Chipyard and the benchmarks |
+| `Scala Basics.md` | Scala and Chisel syntax needed to write a policy |
+| `RTL and Verilog.md` | What hardware description is, how Chisel becomes Verilog, and how Verilator simulates it |
+| `Assembly and RISC-V.md` | RISC-V instructions, the benchmark binaries, and how loads reach the L2 |
+| `Shell Scripts.md` | Reading and writing the bash scripts such as `run-test-suite` |
 
 ## Cache integration (the patch)
 
@@ -131,6 +144,12 @@ Random and Round Robin yield data; PLRU, TrueLRU, BIP and DIP rows are `unsuppor
 | `mixed` | Hot accesses interleaved with streaming |
 
 `conflict` depends on the assumed cache geometry; adjust it if that changes.
+
+**Quick mode:** `QUICK=1 bash run-test-suite` builds smaller versions (1 MiB data
+set, about a quarter of the repetitions) into
+`/workspace/output/replacement-benchmarks-quick` for fast smoke tests. The report
+header shows `Quick mode: 1`. Never compare quick results with full-size ones.
+It is implemented but not yet tested.
 The benchmarks use the course's `metrics.h`/`hpm.h`, whose counters measure
 core and L1 events (the cache-miss event is D-cache, not L2).
 
@@ -176,5 +195,5 @@ git -C generators/rocket-chip-inclusive-cache checkout . && git -C generators/ro
 1. Confirm the Random baseline and Round Robin demo simulate and `+verbose` produces `L2WINDOW` lines.
 2. Check the metrics/comparison CSVs against real simulator output.
 3. Implement true LRU, then BIP, PLRU, and DIP in `replacement/`.
-4. Add a reduced-size benchmark option if Verilator runs are too slow.
+4. Test quick mode (`QUICK=1`); a full-size `reuse` run under Verilator takes a long time.
 5. Verify functional correctness before trusting any performance comparison.
