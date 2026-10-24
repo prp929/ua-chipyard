@@ -1,0 +1,210 @@
+diff --git a/design/craft/inclusivecache/src/Directory.scala b/design/craft/inclusivecache/src/Directory.scala
+index b82011a24f715b52b77a5f6c7d9aa99c0aea77b5..c021477ec48f57577c5296d205de4f0d497f860f 100644
+--- a/design/craft/inclusivecache/src/Directory.scala
++++ b/design/craft/inclusivecache/src/Directory.scala
+@@ -39,6 +39,8 @@ class DirectoryWrite(params: InclusiveCacheParameters) extends InclusiveCacheBun
+   val set  = UInt(params.setBits.W)
+   val way  = UInt(params.wayBits.W)
+   val data = new DirectoryEntry(params)
++  val replacementFill = Bool()
++  val replacementInvalidate = Bool()
+ }
+ 
+ class DirectoryRead(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
+@@ -111,16 +113,9 @@ class Directory(params: InclusiveCacheParameters) extends Module
+   val tag = params.dirReg(RegEnable(io.read.bits.tag, ren), ren1)
+   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
+ 
+-  // Compute the victim way in case of an evicition
+-  val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
+-  val victimSums = Seq.tabulate(params.cache.ways) { i => ((1 << InclusiveCacheParameters.lfsrBits)*i / params.cache.ways).U }
+-  val victimLTE  = Cat(victimSums.map { _ <= victimLFSR }.reverse)
+-  val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways-1, 1), 1.U(1.W))
+-  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
++  val replacement = InclusiveCacheReplacementState(params)
++  val victimWayOH = replacement.victimWayOH(ren, ren2)
+   val victimWay = OHToUInt(victimWayOH)
+-  assert (!ren2 || victimLTE(0) === 1.U)
+-  assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === 0.U) // monotone
+-  assert (!ren2 || PopCount(victimWayOH) === 1.U)
+ 
+   val setQuash = bypass_valid && bypass.set === set
+   val tagMatch = bypass.data.tag === tag
+@@ -132,6 +127,22 @@ class Directory(params: InclusiveCacheParameters) extends Module
+   }.reverse)
+   val hit = hits.orR
+ 
++  replacement.acceptedHit(
++    set,
++    Mux(hit, OHToUInt(hits), bypass.way),
++    ren2 && (hit || (setQuash && tagMatch && bypass.data.state =/= INVALID))
++  )
++  replacement.allocation(
++    write.bits.set,
++    write.bits.way,
++    write.fire && write.bits.replacementFill
++  )
++  replacement.invalidation(
++    write.bits.set,
++    write.bits.way,
++    write.fire && write.bits.replacementInvalidate
++  )
++
+   io.result.valid := ren2
+   io.result.bits.viewAsSupertype(chiselTypeOf(bypass.data)) := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, Mux1H(victimWayOH, ways)))
+   io.result.bits.hit := hit || (setQuash && tagMatch && bypass.data.state =/= INVALID)
+diff --git a/design/craft/inclusivecache/src/MSHR.scala b/design/craft/inclusivecache/src/MSHR.scala
+index eb70f5af182fa601e8a4bcd120a0d6f873f60826..e0d06f571cb5edbce0aca7693b4cdf7410cd7d08 100644
+--- a/design/craft/inclusivecache/src/MSHR.scala
++++ b/design/craft/inclusivecache/src/MSHR.scala
+@@ -309,6 +309,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
+   io.schedule.bits.dir.bits.set   := request.set
+   io.schedule.bits.dir.bits.way   := meta.way
+   io.schedule.bits.dir.bits.data  := Mux(!s_release, invalid, WireInit(new DirectoryEntry(params), init = final_meta_writeback))
++  io.schedule.bits.dir.bits.replacementFill :=
++    s_release && !meta.hit && final_meta_writeback.state =/= INVALID
++  io.schedule.bits.dir.bits.replacementInvalidate :=
++    meta.state =/= INVALID && (!s_release || final_meta_writeback.state === INVALID)
+ 
+   // Coverage of state transitions
+   def cacheState(entry: DirectoryEntry, hit: Bool) = {
+diff --git a/design/craft/inclusivecache/src/Parameters.scala b/design/craft/inclusivecache/src/Parameters.scala
+index 9f3f91861ba4e48879e78f312a9100b8d0356c05..15d6bdcba398c83dfada4f8d84ccefdcc7df7f4d 100644
+--- a/design/craft/inclusivecache/src/Parameters.scala
++++ b/design/craft/inclusivecache/src/Parameters.scala
+@@ -139,6 +139,7 @@ case class InclusiveCacheParameters(
+   inner:  TLEdgeIn,
+   outer:  TLEdgeOut)(implicit val p: Parameters)
+ {
++  val replacement = p(InclusiveCacheReplacementKey)
+   require (cache.ways > 1)
+   require (cache.sets > 1 && isPow2(cache.sets))
+   require (micro.writeBytes <= inner.manager.beatBytes)
+@@ -146,6 +147,30 @@ case class InclusiveCacheParameters(
+   require (inner.manager.beatBytes <= cache.blockBytes)
+   require (outer.manager.beatBytes <= cache.blockBytes)
+ 
++  val probabilityApplies =
++    replacement.policy == InclusiveCacheReplacementPolicy.BIP ||
++    replacement.policy == InclusiveCacheReplacementPolicy.DIP
++  if (probabilityApplies) {
++    require(
++      replacement.bipMruProbabilityDenominator > 0 &&
++        replacement.bipMruProbabilityNumerator >= 0 &&
++        replacement.bipMruProbabilityNumerator <= replacement.bipMruProbabilityDenominator,
++      "BIP MRU insertion probability must be a rational value in [0, 1]."
++    )
++  }
++  if (replacement.policy == InclusiveCacheReplacementPolicy.DIP) {
++    require(
++      replacement.leaderSetsPerPolicy > 0 &&
++        replacement.leaderSetsPerPolicy.toLong * 2 < cache.sets,
++      s"DIP requires positive leader-set counts with at least one follower set; " +
++        s"got ${replacement.leaderSetsPerPolicy} per policy for ${cache.sets} sets."
++    )
++    require(
++      replacement.pselCounterWidth > 0 && replacement.pselCounterWidth <= 31,
++      "DIP PSEL counter width must be between 1 and 31 bits."
++    )
++  }
++
+   // Require that all cached address ranges have contiguous blocks
+   outer.manager.managers.flatMap(_.address).foreach { a =>
+     require (a.alignment >= cache.blockBytes)
+diff --git a/design/craft/inclusivecache/src/ReplacementPolicy.scala b/design/craft/inclusivecache/src/ReplacementPolicy.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8d7a19452a9ce566740704ad1344b7d87a34b8e
+--- /dev/null
++++ b/design/craft/inclusivecache/src/ReplacementPolicy.scala
+@@ -0,0 +1,91 @@
++/*
++ * Copyright 2019 SiFive, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with
++ * the License. You may obtain a copy at
++ *
++ *    https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package sifive.blocks.inclusivecache
++
++import chisel3._
++import chisel3.util._
++import org.chipsalliance.cde.config.Field
++import freechips.rocketchip.util._
++
++sealed trait InclusiveCacheReplacementPolicy {
++  def name: String
++}
++
++object InclusiveCacheReplacementPolicy {
++  case object Random extends InclusiveCacheReplacementPolicy { val name = "random" }
++  case object PLRU extends InclusiveCacheReplacementPolicy { val name = "PLRU" }
++  case object TrueLRU extends InclusiveCacheReplacementPolicy { val name = "true LRU" }
++  case object BIP extends InclusiveCacheReplacementPolicy { val name = "BIP" }
++  case object DIP extends InclusiveCacheReplacementPolicy { val name = "DIP" }
++}
++
++case class InclusiveCacheReplacementConfig(
++  policy: InclusiveCacheReplacementPolicy = InclusiveCacheReplacementPolicy.Random,
++  bipMruProbabilityNumerator: Int = 1,
++  bipMruProbabilityDenominator: Int = 32,
++  leaderSetsPerPolicy: Int = 16,
++  pselCounterWidth: Int = 10
++)
++
++case object InclusiveCacheReplacementKey
++  extends Field[InclusiveCacheReplacementConfig](InclusiveCacheReplacementConfig())
++
++/** Event-oriented interface for future replacement implementations.
++  * Hits, new allocations, and invalidations are intentionally separate.
++  */
++abstract class InclusiveCacheReplacementState(val params: InclusiveCacheParameters) {
++  def victimWayOH(readEnable: Bool, resultValid: Bool): UInt
++  def acceptedHit(set: UInt, way: UInt, enable: Bool): Unit
++  def allocation(set: UInt, way: UInt, enable: Bool): Unit
++  def invalidation(set: UInt, way: UInt, enable: Bool): Unit
++}
++
++/** The pinned source's existing LFSR victim selection, kept bit-for-bit. */
++class RandomInclusiveCacheReplacementState(params: InclusiveCacheParameters)
++  extends InclusiveCacheReplacementState(params) {
++  def victimWayOH(readEnable: Bool, resultValid: Bool): UInt = {
++    val victimLFSR = random.LFSR(width = 16, params.dirReg(readEnable))(
++      InclusiveCacheParameters.lfsrBits - 1, 0)
++    val victimSums = Seq.tabulate(params.cache.ways) { i =>
++      ((1 << InclusiveCacheParameters.lfsrBits) * i / params.cache.ways).U
++    }
++    val victimLTE = Cat(victimSums.map { _ <= victimLFSR }.reverse)
++    val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways - 1, 1), 1.U(1.W))
++    val victimWayOH = victimSimp(params.cache.ways - 1, 0) & ~(victimSimp >> 1)
++    assert (!resultValid || victimLTE(0) === 1.U)
++    assert (!resultValid || ((victimSimp >> 1) & ~victimSimp) === 0.U)
++    assert (!resultValid || PopCount(victimWayOH) === 1.U)
++
++    victimWayOH
++  }
++
++  def acceptedHit(set: UInt, way: UInt, enable: Bool): Unit = {}
++  def allocation(set: UInt, way: UInt, enable: Bool): Unit = {}
++  def invalidation(set: UInt, way: UInt, enable: Bool): Unit = {}
++}
++
++object InclusiveCacheReplacementState {
++  def apply(params: InclusiveCacheParameters): InclusiveCacheReplacementState = {
++    val policy = params.replacement.policy
++    require(
++      policy == InclusiveCacheReplacementPolicy.Random,
++      s"InclusiveCache replacement policy '${policy.name}' is not implemented " +
++        "at this revision; only the existing random policy is available."
++    )
++    new RandomInclusiveCacheReplacementState(params)
++  }
++}

@@ -1,0 +1,248 @@
+#!/bin/bash
+set -uo pipefail
+
+CHIPYARD_ROOT="${CHIPYARD_ROOT:-/workspace/chipyard}"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BENCH_DIR="${BENCH_DIR:-/workspace/course/benchmarks}"
+SIM_DIR="${SIM_DIR:-$CHIPYARD_ROOT/sims/verilator}"
+OUTPUT_DIR="${OUTPUT_DIR:-/workspace/output}"
+RESULTS_DIR="${RESULTS_DIR:-$OUTPUT_DIR/replacement-suite-$(date +%Y%m%d-%H%M%S)}"
+CACHE_REPO="${CACHE_REPO:-$CHIPYARD_ROOT/generators/rocket-chip-inclusive-cache}"
+CACHE_REVISION="85420cf26f9abcebf685f0d68d14189598943c19"
+REPLACEMENT_PATCH="$PROJECT_DIR/rocket-chip-inclusive-cache.patch"
+CONFIG_SOURCE="$PROJECT_DIR/L2ReplacementConfigs.scala"
+CONFIG_LINK="${CONFIG_LINK:-$CHIPYARD_ROOT/generators/chipyard/src/main/scala/config/L2ReplacementConfigs.scala}"
+
+BASELINES="${BASELINES:-L2RandomReplacementConfig}"
+POLICIES="${POLICIES:-L2PLRUReplacementConfig,L2TrueLRUReplacementConfig,L2BIPReplacementConfig,L2DIPReplacementConfig}"
+BENCHMARKS="${BENCHMARKS:-isp_bench}"
+
+IFS=',' read -r -a baseline_configs <<< "$BASELINES"
+IFS=',' read -r -a policy_configs <<< "$POLICIES"
+IFS=',' read -r -a benchmarks <<< "$BENCHMARKS"
+
+mkdir -p "$RESULTS_DIR" "$OUTPUT_DIR" || exit 1
+metrics_file="$RESULTS_DIR/metrics.csv"
+comparison_file="$RESULTS_DIR/comparison.csv"
+
+printf '%s\n' 'role,config,benchmark,phase,cycles,instret,branch,load,mul,bp_dir_ms,bp_tgt_ms,md_stall,ic_miss,dc_miss,checksum,status' > "$metrics_file"
+
+if ! git -C "$CACHE_REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "InclusiveCache checkout missing: $CACHE_REPO" >&2
+    exit 1
+fi
+actual_revision="$(git -C "$CACHE_REPO" rev-parse HEAD)"
+if [ "$actual_revision" != "$CACHE_REVISION" ]; then
+    echo "Expected InclusiveCache revision $CACHE_REVISION, found $actual_revision." >&2
+    exit 1
+fi
+
+if git -C "$CACHE_REPO" apply --reverse --check "$REPLACEMENT_PATCH" >/dev/null 2>&1; then
+    echo "InclusiveCache replacement patch already applied."
+elif git -C "$CACHE_REPO" apply --check "$REPLACEMENT_PATCH"; then
+    git -C "$CACHE_REPO" apply "$REPLACEMENT_PATCH"
+    echo "Applied InclusiveCache replacement patch."
+else
+    echo "Could not apply the replacement patch; check the InclusiveCache worktree." >&2
+    exit 1
+fi
+
+if [ -L "$CONFIG_LINK" ]; then
+    if [ "$(readlink "$CONFIG_LINK")" != "$CONFIG_SOURCE" ]; then
+        echo "A different config symlink already exists: $CONFIG_LINK" >&2
+        exit 1
+    fi
+elif [ -e "$CONFIG_LINK" ]; then
+    echo "A different config file already exists: $CONFIG_LINK" >&2
+    exit 1
+else
+    ln -s "$CONFIG_SOURCE" "$CONFIG_LINK" || exit 1
+fi
+
+if ! make -C "$BENCH_DIR" OUTDIR="$OUTPUT_DIR"; then
+    echo "Benchmark build failed; no policy simulations were run." >&2
+    exit 1
+fi
+
+record_status() {
+    local role="$1"
+    local config="$2"
+    local benchmark="$3"
+    local status="$4"
+    printf '%s,%s,%s,STATUS,,,,,,,,,,,,%s\n' \
+        "$role" "$config" "$benchmark" "$status" >> "$metrics_file"
+}
+
+parse_run_log() {
+    local role="$1"
+    local config="$2"
+    local benchmark="$3"
+    local status="$4"
+    local log="$5"
+
+    awk -v role="$role" -v config="$config" -v benchmark="$benchmark" -v status="$status" '
+        $1 == "phase" { next }
+        $1 ~ /^CHECKSUM,/ {
+            split($1, checksum, ",")
+            printf "%s,%s,%s,CHECKSUM,,,,,,,,,,,%s,%s\n", role, config, benchmark, checksum[2], status
+            next
+        }
+        NF >= 11 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {
+            printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,,%s\n", \
+                role, config, benchmark, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, status
+            found = 1
+        }
+        END {
+            if (!found) {
+                printf "%s,%s,%s,STATUS,,,,,,,,,,,,%s\n", role, config, benchmark, status
+            }
+        }
+    ' "$log" >> "$metrics_file"
+}
+
+run_configuration() {
+    local role="$1"
+    local config="$2"
+    local build_log="$RESULTS_DIR/build-${config}.log"
+    local simulator="$SIM_DIR/simulator-chipyard.harness-${config}"
+
+    echo "[$role] Building $config"
+    if ! make -C "$SIM_DIR" "CONFIG=$config" >"$build_log" 2>&1; then
+        if grep -Fq "is not implemented at this revision" "$build_log"; then
+            echo "[$role] $config is not implemented yet; recorded as unsupported."
+            for benchmark in "${benchmarks[@]}"; do
+                record_status "$role" "$config" "$benchmark" "unsupported"
+            done
+        else
+            echo "[$role] Build failed for $config; see $build_log" >&2
+            for benchmark in "${benchmarks[@]}"; do
+                record_status "$role" "$config" "$benchmark" "build_failed"
+            done
+            return 1
+        fi
+        return 0
+    fi
+
+    if [ ! -x "$simulator" ]; then
+        echo "[$role] Build succeeded but simulator is missing: $simulator" >&2
+        for benchmark in "${benchmarks[@]}"; do
+            record_status "$role" "$config" "$benchmark" "simulator_missing"
+        done
+        return 1
+    fi
+
+    local failed=0
+    for benchmark in "${benchmarks[@]}"; do
+        local program="$OUTPUT_DIR/$benchmark.riscv"
+        local run_log="$RESULTS_DIR/${config}-${benchmark}.log"
+        if [ ! -f "$program" ]; then
+            echo "Benchmark executable missing: $program" >&2
+            record_status "$role" "$config" "$benchmark" "program_missing"
+            failed=1
+            continue
+        fi
+
+        echo "[$role] Running $config on $benchmark"
+        if "$simulator" "$program" >"$run_log" 2>&1; then
+            parse_run_log "$role" "$config" "$benchmark" "ok" "$run_log"
+        else
+            echo "[$role] Simulation failed for $config / $benchmark; see $run_log" >&2
+            parse_run_log "$role" "$config" "$benchmark" "run_failed" "$run_log"
+            failed=1
+        fi
+    done
+    return "$failed"
+}
+
+overall_failure=0
+for config in "${baseline_configs[@]}"; do
+    if ! run_configuration "baseline" "$config"; then
+        overall_failure=1
+    fi
+done
+for config in "${policy_configs[@]}"; do
+    if ! run_configuration "policy" "$config"; then
+        overall_failure=1
+    fi
+done
+
+python3 - "$metrics_file" "$comparison_file" "${baseline_configs[*]}" "${policy_configs[*]}" "${benchmarks[*]}" <<'PY'
+import csv
+import sys
+
+metrics_path, comparison_path = sys.argv[1:3]
+baselines = sys.argv[3].split()
+policies = sys.argv[4].split()
+benchmarks = sys.argv[5].split()
+fields = (
+    "cycles", "instret", "branch", "load", "mul", "bp_dir_ms",
+    "bp_tgt_ms", "md_stall", "ic_miss", "dc_miss",
+)
+totals = {}
+checksums = {}
+statuses = {}
+
+with open(metrics_path, newline="") as source:
+    for row in csv.DictReader(source):
+        key = (row["role"], row["config"], row["benchmark"])
+        if row["phase"] == "STATUS":
+            statuses[key] = row["status"]
+        elif row["phase"] == "CHECKSUM":
+            checksums[key] = row["checksum"]
+        elif row["status"] == "ok":
+            values = totals.setdefault(key, {field: 0 for field in fields})
+            for field in fields:
+                values[field] += int(row[field])
+
+columns = (
+    "baseline", "policy", "benchmark", "baseline_cycles", "policy_cycles",
+    "cycles_speedup", "baseline_dc_miss", "policy_dc_miss",
+    "checksum_match", "status",
+)
+with open(comparison_path, "w", newline="") as destination:
+    writer = csv.DictWriter(destination, fieldnames=columns)
+    writer.writeheader()
+    for benchmark in benchmarks:
+        for baseline in baselines:
+            baseline_key = ("baseline", baseline, benchmark)
+            for policy in policies:
+                policy_key = ("policy", policy, benchmark)
+                status = "ok"
+                if baseline_key not in totals:
+                    status = statuses.get(baseline_key, "baseline_unavailable")
+                elif policy_key not in totals:
+                    status = statuses.get(policy_key, "policy_unavailable")
+
+                baseline_values = totals.get(baseline_key, {})
+                policy_values = totals.get(policy_key, {})
+                baseline_cycles = baseline_values.get("cycles", "")
+                policy_cycles = policy_values.get("cycles", "")
+                speedup = ""
+                if status == "ok" and policy_cycles:
+                    speedup = f"{baseline_cycles / policy_cycles:.6f}"
+                checksum_match = ""
+                if baseline_key in checksums and policy_key in checksums:
+                    checksum_match = str(
+                        checksums[baseline_key] == checksums[policy_key]
+                    ).lower()
+
+                writer.writerow({
+                    "baseline": baseline,
+                    "policy": policy,
+                    "benchmark": benchmark,
+                    "baseline_cycles": baseline_cycles,
+                    "policy_cycles": policy_cycles,
+                    "cycles_speedup": speedup,
+                    "baseline_dc_miss": baseline_values.get("dc_miss", ""),
+                    "policy_dc_miss": policy_values.get("dc_miss", ""),
+                    "checksum_match": checksum_match,
+                    "status": status,
+                })
+PY
+
+echo "Raw metrics: $metrics_file"
+echo "Baseline comparisons: $comparison_file"
+echo "Simulator logs: $RESULTS_DIR"
+if [ "$overall_failure" -ne 0 ]; then
+    exit 1
+fi
