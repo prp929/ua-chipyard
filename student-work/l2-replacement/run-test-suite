@@ -4,9 +4,11 @@ set -uo pipefail
 CHIPYARD_ROOT="${CHIPYARD_ROOT:-/workspace/chipyard}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="${BENCH_DIR:-/workspace/course/benchmarks}"
+MICRO_BENCH_DIR="$PROJECT_DIR/benchmarks"
 SIM_DIR="${SIM_DIR:-$CHIPYARD_ROOT/sims/verilator}"
 OUTPUT_DIR="${OUTPUT_DIR:-/workspace/output}"
 RESULTS_DIR="${RESULTS_DIR:-$OUTPUT_DIR/replacement-suite-$(date +%Y%m%d-%H%M%S)}"
+BENCH_OUTPUT_DIR="${BENCH_OUTPUT_DIR:-$OUTPUT_DIR/replacement-benchmarks}"
 CACHE_REPO="${CACHE_REPO:-$CHIPYARD_ROOT/generators/rocket-chip-inclusive-cache}"
 CACHE_REVISION="85420cf26f9abcebf685f0d68d14189598943c19"
 REPLACEMENT_PATCH="$PROJECT_DIR/rocket-chip-inclusive-cache.patch"
@@ -15,17 +17,17 @@ CONFIG_LINK="${CONFIG_LINK:-$CHIPYARD_ROOT/generators/chipyard/src/main/scala/co
 
 BASELINES="${BASELINES:-L2RandomReplacementConfig}"
 POLICIES="${POLICIES:-L2PLRUReplacementConfig,L2TrueLRUReplacementConfig,L2BIPReplacementConfig,L2DIPReplacementConfig}"
-BENCHMARKS="${BENCHMARKS:-isp_bench}"
+BENCHMARKS="${BENCHMARKS:-reuse,streaming,stream_pollution,capacity,conflict,phase_change,mixed}"
 
 IFS=',' read -r -a baseline_configs <<< "$BASELINES"
 IFS=',' read -r -a policy_configs <<< "$POLICIES"
 IFS=',' read -r -a benchmarks <<< "$BENCHMARKS"
 
-mkdir -p "$RESULTS_DIR" "$OUTPUT_DIR" || exit 1
+mkdir -p "$RESULTS_DIR" "$OUTPUT_DIR" "$BENCH_OUTPUT_DIR" || exit 1
 metrics_file="$RESULTS_DIR/metrics.csv"
 comparison_file="$RESULTS_DIR/comparison.csv"
 
-printf '%s\n' 'role,config,benchmark,phase,cycles,instret,branch,load,mul,bp_dir_ms,bp_tgt_ms,md_stall,ic_miss,dc_miss,checksum,status' > "$metrics_file"
+printf '%s\n' 'role,config,benchmark,phase,cycles,instret,branch,load,mul,bp_dir_ms,bp_tgt_ms,md_stall,ic_miss,dc_miss,l2_access,l2_miss,checksum,status' > "$metrics_file"
 
 if ! git -C "$CACHE_REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "InclusiveCache checkout missing: $CACHE_REPO" >&2
@@ -59,47 +61,36 @@ else
     ln -s "$CONFIG_SOURCE" "$CONFIG_LINK" || exit 1
 fi
 
-if ! make -C "$BENCH_DIR" OUTDIR="$OUTPUT_DIR"; then
-    echo "Benchmark build failed; no policy simulations were run." >&2
+CACHE_SRC="$CACHE_REPO/design/craft/inclusivecache/src"
+for policy_file in "$PROJECT_DIR"/replacement/*.scala; do
+    link="$CACHE_SRC/$(basename "$policy_file")"
+    if [ -L "$link" ] && [ "$(readlink "$link")" = "$policy_file" ]; then
+        continue
+    elif [ -e "$link" ] || [ -L "$link" ]; then
+        echo "A different file already exists: $link" >&2
+        exit 1
+    fi
+    ln -s "$policy_file" "$link" || exit 1
+done
+if [ -f "$CHIPYARD_ROOT/env.sh" ]; then
+    source "$CHIPYARD_ROOT/env.sh" >/dev/null
+fi
+benchmark_list="${BENCHMARKS//,/ }"
+if ! make -C "$MICRO_BENCH_DIR" \
+    OUTDIR="$BENCH_OUTPUT_DIR" \
+    COURSE_BENCH_DIR="$BENCH_DIR" \
+    BENCHES="$benchmark_list"; then
+    echo "Microbenchmark build failed; no policy simulations were run." >&2
     exit 1
 fi
 
 record_status() {
-    local role="$1"
-    local config="$2"
-    local benchmark="$3"
-    local status="$4"
-    printf '%s,%s,%s,STATUS,,,,,,,,,,,,%s\n' \
-        "$role" "$config" "$benchmark" "$status" >> "$metrics_file"
+    python3 "$PROJECT_DIR/parse_run_log.py" --status "$1" "$2" "$3" "$4" >> "$metrics_file"
 }
 
 parse_run_log() {
-    local role="$1"
-    local config="$2"
-    local benchmark="$3"
-    local status="$4"
-    local log="$5"
-
-    awk -v role="$role" -v config="$config" -v benchmark="$benchmark" -v status="$status" '
-        $1 == "phase" { next }
-        $1 ~ /^CHECKSUM,/ {
-            split($1, checksum, ",")
-            printf "%s,%s,%s,CHECKSUM,,,,,,,,,,,%s,%s\n", role, config, benchmark, checksum[2], status
-            next
-        }
-        NF >= 11 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {
-            printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,,%s\n", \
-                role, config, benchmark, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, status
-            found = 1
-        }
-        END {
-            if (!found) {
-                printf "%s,%s,%s,STATUS,,,,,,,,,,,,%s\n", role, config, benchmark, status
-            }
-        }
-    ' "$log" >> "$metrics_file"
+    python3 "$PROJECT_DIR/parse_run_log.py" "$1" "$2" "$3" "$4" "$5" >> "$metrics_file"
 }
-
 run_configuration() {
     local role="$1"
     local config="$2"
@@ -133,7 +124,7 @@ run_configuration() {
 
     local failed=0
     for benchmark in "${benchmarks[@]}"; do
-        local program="$OUTPUT_DIR/$benchmark.riscv"
+        local program="$BENCH_OUTPUT_DIR/$benchmark.riscv"
         local run_log="$RESULTS_DIR/${config}-${benchmark}.log"
         if [ ! -f "$program" ]; then
             echo "Benchmark executable missing: $program" >&2
@@ -143,7 +134,7 @@ run_configuration() {
         fi
 
         echo "[$role] Running $config on $benchmark"
-        if "$simulator" "$program" >"$run_log" 2>&1; then
+        if "$simulator" +verbose "$program" >"$run_log" 2>&1; then
             parse_run_log "$role" "$config" "$benchmark" "ok" "$run_log"
         else
             echo "[$role] Simulation failed for $config / $benchmark; see $run_log" >&2
@@ -176,7 +167,7 @@ policies = sys.argv[4].split()
 benchmarks = sys.argv[5].split()
 fields = (
     "cycles", "instret", "branch", "load", "mul", "bp_dir_ms",
-    "bp_tgt_ms", "md_stall", "ic_miss", "dc_miss",
+    "bp_tgt_ms", "md_stall", "ic_miss", "dc_miss", "l2_access", "l2_miss",
 )
 totals = {}
 checksums = {}
@@ -192,12 +183,16 @@ with open(metrics_path, newline="") as source:
         elif row["status"] == "ok":
             values = totals.setdefault(key, {field: 0 for field in fields})
             for field in fields:
-                values[field] += int(row[field])
+                if row[field] == "":
+                    values[field] = None
+                elif values[field] is not None:
+                    values[field] += int(row[field])
 
 columns = (
     "baseline", "policy", "benchmark", "baseline_cycles", "policy_cycles",
     "cycles_speedup", "baseline_dc_miss", "policy_dc_miss",
-    "checksum_match", "status",
+    "baseline_l2_miss", "policy_l2_miss", "baseline_l2_mpki",
+    "policy_l2_mpki", "l2_miss_reduction_pct", "checksum_match", "status",
 )
 with open(comparison_path, "w", newline="") as destination:
     writer = csv.DictWriter(destination, fieldnames=columns)
@@ -220,6 +215,17 @@ with open(comparison_path, "w", newline="") as destination:
                 speedup = ""
                 if status == "ok" and policy_cycles:
                     speedup = f"{baseline_cycles / policy_cycles:.6f}"
+                def mpki(values):
+                    miss = values.get("l2_miss")
+                    if miss is None or not values.get("instret"):
+                        return ""
+                    return f"{miss * 1000 / values['instret']:.4f}"
+
+                baseline_miss = baseline_values.get("l2_miss")
+                policy_miss = policy_values.get("l2_miss")
+                reduction = ""
+                if status == "ok" and baseline_miss and policy_miss is not None:
+                    reduction = f"{100 * (baseline_miss - policy_miss) / baseline_miss:.4f}"
                 checksum_match = ""
                 if baseline_key in checksums and policy_key in checksums:
                     checksum_match = str(
@@ -235,12 +241,24 @@ with open(comparison_path, "w", newline="") as destination:
                     "cycles_speedup": speedup,
                     "baseline_dc_miss": baseline_values.get("dc_miss", ""),
                     "policy_dc_miss": policy_values.get("dc_miss", ""),
+                    "baseline_l2_miss": "" if baseline_miss is None else baseline_miss,
+                    "policy_l2_miss": "" if policy_miss is None else policy_miss,
+                    "baseline_l2_mpki": mpki(baseline_values),
+                    "policy_l2_mpki": mpki(policy_values),
+                    "l2_miss_reduction_pct": reduction,
                     "checksum_match": checksum_match,
                     "status": status,
                 })
 PY
 
-echo "Raw metrics: $metrics_file"
+EXPORT_DIR="${EXPORT_DIR:-/workspace/export}"
+[ -d "$EXPORT_DIR" ] && [ -w "$EXPORT_DIR" ] || EXPORT_DIR="$PROJECT_DIR/results"
+report_file="$EXPORT_DIR/run_$(date +%m_%d_%H_%M).txt"
+mkdir -p "$EXPORT_DIR" && python3 "$PROJECT_DIR/format_report.py" \
+    "$comparison_file" "$metrics_file" \
+    "Date:       $(date)" "Baselines:  $BASELINES" \
+    "Policies:   $POLICIES" "Benchmarks: $BENCHMARKS" > "$report_file"
+echo "Report: $report_file"echo "Raw metrics: $metrics_file"
 echo "Baseline comparisons: $comparison_file"
 echo "Simulator logs: $RESULTS_DIR"
 if [ "$overall_failure" -ne 0 ]; then

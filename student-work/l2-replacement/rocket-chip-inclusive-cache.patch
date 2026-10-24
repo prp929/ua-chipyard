@@ -1,5 +1,5 @@
 diff --git a/design/craft/inclusivecache/src/Directory.scala b/design/craft/inclusivecache/src/Directory.scala
-index b82011a24f715b52b77a5f6c7d9aa99c0aea77b5..c021477ec48f57577c5296d205de4f0d497f860f 100644
+index b82011a..2fe9260 100644
 --- a/design/craft/inclusivecache/src/Directory.scala
 +++ b/design/craft/inclusivecache/src/Directory.scala
 @@ -39,6 +39,8 @@ class DirectoryWrite(params: InclusiveCacheParameters) extends InclusiveCacheBun
@@ -30,7 +30,7 @@ index b82011a24f715b52b77a5f6c7d9aa99c0aea77b5..c021477ec48f57577c5296d205de4f0d
  
    val setQuash = bypass_valid && bypass.set === set
    val tagMatch = bypass.data.tag === tag
-@@ -132,6 +127,22 @@ class Directory(params: InclusiveCacheParameters) extends Module
+@@ -132,10 +127,27 @@ class Directory(params: InclusiveCacheParameters) extends Module
    }.reverse)
    val hit = hits.orR
  
@@ -53,8 +53,69 @@ index b82011a24f715b52b77a5f6c7d9aa99c0aea77b5..c021477ec48f57577c5296d205de4f0d
    io.result.valid := ren2
    io.result.bits.viewAsSupertype(chiselTypeOf(bypass.data)) := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, Mux1H(victimWayOH, ways)))
    io.result.bits.hit := hit || (setQuash && tagMatch && bypass.data.state =/= INVALID)
+   io.result.bits.way := Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch, bypass.way, victimWay))
++  L2AccessMonitor(io.result.valid, io.result.bits.hit)
+ 
+   params.ccover(ren2 && setQuash && tagMatch, "DIRECTORY_HIT_BYPASS", "Bypassing write to a directory hit")
+   params.ccover(ren2 && setQuash && !tagMatch && wayMatch, "DIRECTORY_EVICT_BYPASS", "Bypassing a write to a directory eviction")
+diff --git a/design/craft/inclusivecache/src/L2AccessMonitor.scala b/design/craft/inclusivecache/src/L2AccessMonitor.scala
+new file mode 100644
+index 0000000..a788ba3
+--- /dev/null
++++ b/design/craft/inclusivecache/src/L2AccessMonitor.scala
+@@ -0,0 +1,49 @@
++/*
++ * Copyright 2019 SiFive, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with
++ * the License. You may obtain a copy at
++ *
++ *    https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package sifive.blocks.inclusivecache
++
++import chisel3._
++import chisel3.util._
++
++/** Simulation-only L2 hit/miss instrumentation; it has no effect on cache behavior.
++  *
++  * Every directory lookup result is one L2 access, and a lookup that does not
++  * hit is an L2 miss. After each window of `windowAccesses` accesses it prints
++  *   L2WINDOW,<cycles since reset>,<accesses>,<misses>
++  * when the simulator runs with +verbose. Windows are additive across banks.
++  * A trailing partial window is never printed.
++  */
++object L2AccessMonitor {
++  val windowAccesses = 64
++
++  def apply(valid: Bool, hit: Bool): Unit = {
++    val cycle    = RegInit(0.U(64.W))
++    val accesses = RegInit(0.U(log2Ceil(windowAccesses).W))
++    val misses   = RegInit(0.U(32.W))
++    val windowMisses = misses + (valid && !hit).asUInt
++
++    cycle := cycle + 1.U
++    when (valid) {
++      accesses := accesses + 1.U
++      misses := windowMisses
++      when (accesses === (windowAccesses - 1).U) {
++        printf("L2WINDOW,%d,%d,%d\n", cycle, windowAccesses.U, windowMisses)
++        misses := 0.U
++      }
++    }
++  }
++}
+\ No newline at end of file
 diff --git a/design/craft/inclusivecache/src/MSHR.scala b/design/craft/inclusivecache/src/MSHR.scala
-index eb70f5af182fa601e8a4bcd120a0d6f873f60826..e0d06f571cb5edbce0aca7693b4cdf7410cd7d08 100644
+index eb70f5a..e0d06f5 100644
 --- a/design/craft/inclusivecache/src/MSHR.scala
 +++ b/design/craft/inclusivecache/src/MSHR.scala
 @@ -309,6 +309,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
@@ -69,7 +130,7 @@ index eb70f5af182fa601e8a4bcd120a0d6f873f60826..e0d06f571cb5edbce0aca7693b4cdf74
    // Coverage of state transitions
    def cacheState(entry: DirectoryEntry, hit: Bool) = {
 diff --git a/design/craft/inclusivecache/src/Parameters.scala b/design/craft/inclusivecache/src/Parameters.scala
-index 9f3f91861ba4e48879e78f312a9100b8d0356c05..15d6bdcba398c83dfada4f8d84ccefdcc7df7f4d 100644
+index 9f3f918..15d6bdc 100644
 --- a/design/craft/inclusivecache/src/Parameters.scala
 +++ b/design/craft/inclusivecache/src/Parameters.scala
 @@ -139,6 +139,7 @@ case class InclusiveCacheParameters(
@@ -113,10 +174,10 @@ index 9f3f91861ba4e48879e78f312a9100b8d0356c05..15d6bdcba398c83dfada4f8d84ccefdc
      require (a.alignment >= cache.blockBytes)
 diff --git a/design/craft/inclusivecache/src/ReplacementPolicy.scala b/design/craft/inclusivecache/src/ReplacementPolicy.scala
 new file mode 100644
-index 0000000000000000000000000000000000000000..f8d7a19452a9ce566740704ad1344b7d87a34b8e
+index 0000000..5277ccf
 --- /dev/null
 +++ b/design/craft/inclusivecache/src/ReplacementPolicy.scala
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,95 @@
 +/*
 + * Copyright 2019 SiFive, Inc.
 + *
@@ -198,13 +259,18 @@ index 0000000000000000000000000000000000000000..f8d7a19452a9ce566740704ad1344b7d
 +}
 +
 +object InclusiveCacheReplacementState {
-+  def apply(params: InclusiveCacheParameters): InclusiveCacheReplacementState = {
-+    val policy = params.replacement.policy
-+    require(
-+      policy == InclusiveCacheReplacementPolicy.Random,
-+      s"InclusiveCache replacement policy '${policy.name}' is not implemented " +
-+        "at this revision; only the existing random policy is available."
-+    )
-+    new RandomInclusiveCacheReplacementState(params)
-+  }
++  def unimplemented(policy: InclusiveCacheReplacementPolicy): Nothing =
++    throw new IllegalArgumentException(
++      s"requirement failed: InclusiveCache replacement policy '${policy.name}' is not implemented " +
++        "at this revision; only the existing random policy is available.")
++
++  def apply(params: InclusiveCacheParameters): InclusiveCacheReplacementState =
++    params.replacement.policy match {
++      case InclusiveCacheReplacementPolicy.Random  => new RandomInclusiveCacheReplacementState(params)
++      case InclusiveCacheReplacementPolicy.PLRU    => new PLRUInclusiveCacheReplacementState(params)
++      case InclusiveCacheReplacementPolicy.TrueLRU => new TrueLRUInclusiveCacheReplacementState(params)
++      case InclusiveCacheReplacementPolicy.BIP     => new BIPInclusiveCacheReplacementState(params)
++      case InclusiveCacheReplacementPolicy.DIP     => new DIPInclusiveCacheReplacementState(params)
++    }
 +}
+\ No newline at end of file

@@ -1,0 +1,6 @@
+﻿# Compose override: mounts a host folder into the container for reports.
+# Used with the shared compose.yaml via run-and-export.ps1 (EXPORT_HOST_DIR is required).
+services:
+  chipyard:
+    volumes:
+      - "${EXPORT_HOST_DIR:?set EXPORT_HOST_DIR}:/workspace/export"
