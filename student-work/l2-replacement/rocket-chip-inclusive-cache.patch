@@ -1,5 +1,7 @@
 diff --git a/design/craft/inclusivecache/src/Directory.scala b/design/craft/inclusivecache/src/Directory.scala
-index b82011a..2fe9260 100644
+old mode 100644
+new mode 100755
+index b82011a..a53c557
 --- a/design/craft/inclusivecache/src/Directory.scala
 +++ b/design/craft/inclusivecache/src/Directory.scala
 @@ -39,6 +39,8 @@ class DirectoryWrite(params: InclusiveCacheParameters) extends InclusiveCacheBun
@@ -22,7 +24,7 @@ index b82011a..2fe9260 100644
 -  val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways-1, 1), 1.U(1.W))
 -  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
 +  val replacement = InclusiveCacheReplacementState(params)
-+  val victimWayOH = replacement.victimWayOH(ren, ren2)
++  val victimWayOH = replacement.victimWayOH(ren, ren2, set)
    val victimWay = OHToUInt(victimWayOH)
 -  assert (!ren2 || victimLTE(0) === 1.U)
 -  assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === 0.U) // monotone
@@ -173,11 +175,11 @@ index 9f3f918..15d6bdc 100644
    outer.manager.managers.flatMap(_.address).foreach { a =>
      require (a.alignment >= cache.blockBytes)
 diff --git a/design/craft/inclusivecache/src/ReplacementPolicy.scala b/design/craft/inclusivecache/src/ReplacementPolicy.scala
-new file mode 100644
-index 0000000..5277ccf
+new file mode 100755
+index 0000000..bd3f8a1
 --- /dev/null
 +++ b/design/craft/inclusivecache/src/ReplacementPolicy.scala
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,105 @@
 +/*
 + * Copyright 2019 SiFive, Inc.
 + *
@@ -211,6 +213,7 @@ index 0000000..5277ccf
 +  case object TrueLRU extends InclusiveCacheReplacementPolicy { val name = "true LRU" }
 +  case object BIP extends InclusiveCacheReplacementPolicy { val name = "BIP" }
 +  case object DIP extends InclusiveCacheReplacementPolicy { val name = "DIP" }
++  case object RoundRobin extends InclusiveCacheReplacementPolicy { val name = "round robin (demo)" }
 +}
 +
 +case class InclusiveCacheReplacementConfig(
@@ -224,11 +227,14 @@ index 0000000..5277ccf
 +case object InclusiveCacheReplacementKey
 +  extends Field[InclusiveCacheReplacementConfig](InclusiveCacheReplacementConfig())
 +
-+/** Event-oriented interface for future replacement implementations.
++/** Event-oriented interface for replacement implementations.
 +  * Hits, new allocations, and invalidations are intentionally separate.
++  *
++  * `set` in victimWayOH is the set of the directory lookup whose result is
++  * valid in the current cycle (`resultValid`); the victim is only used on a miss.
 +  */
 +abstract class InclusiveCacheReplacementState(val params: InclusiveCacheParameters) {
-+  def victimWayOH(readEnable: Bool, resultValid: Bool): UInt
++  def victimWayOH(readEnable: Bool, resultValid: Bool, set: UInt): UInt
 +  def acceptedHit(set: UInt, way: UInt, enable: Bool): Unit
 +  def allocation(set: UInt, way: UInt, enable: Bool): Unit
 +  def invalidation(set: UInt, way: UInt, enable: Bool): Unit
@@ -237,7 +243,7 @@ index 0000000..5277ccf
 +/** The pinned source's existing LFSR victim selection, kept bit-for-bit. */
 +class RandomInclusiveCacheReplacementState(params: InclusiveCacheParameters)
 +  extends InclusiveCacheReplacementState(params) {
-+  def victimWayOH(readEnable: Bool, resultValid: Bool): UInt = {
++  def victimWayOH(readEnable: Bool, resultValid: Bool, set: UInt): UInt = {
 +    val victimLFSR = random.LFSR(width = 16, params.dirReg(readEnable))(
 +      InclusiveCacheParameters.lfsrBits - 1, 0)
 +    val victimSums = Seq.tabulate(params.cache.ways) { i =>
@@ -262,15 +268,21 @@ index 0000000..5277ccf
 +  def unimplemented(policy: InclusiveCacheReplacementPolicy): Nothing =
 +    throw new IllegalArgumentException(
 +      s"requirement failed: InclusiveCache replacement policy '${policy.name}' is not implemented " +
-+        "at this revision; only the existing random policy is available.")
++        "at this revision; only the existing random policy and the round-robin demo are available.")
 +
-+  def apply(params: InclusiveCacheParameters): InclusiveCacheReplacementState =
++  def apply(params: InclusiveCacheParameters): InclusiveCacheReplacementState = {
++    // Printed once per directory at elaboration; the test runner copies it into its report.
++    println(s"[L2Replacement] policy=${params.replacement.policy.name} sets=${params.cache.sets} " +
++      s"ways=${params.cache.ways} blockBytes=${params.cache.blockBytes} " +
++      s"sizeKiB=${params.cache.sets * params.cache.ways * params.cache.blockBytes / 1024}")
 +    params.replacement.policy match {
 +      case InclusiveCacheReplacementPolicy.Random  => new RandomInclusiveCacheReplacementState(params)
 +      case InclusiveCacheReplacementPolicy.PLRU    => new PLRUInclusiveCacheReplacementState(params)
 +      case InclusiveCacheReplacementPolicy.TrueLRU => new TrueLRUInclusiveCacheReplacementState(params)
 +      case InclusiveCacheReplacementPolicy.BIP     => new BIPInclusiveCacheReplacementState(params)
 +      case InclusiveCacheReplacementPolicy.DIP     => new DIPInclusiveCacheReplacementState(params)
++      case InclusiveCacheReplacementPolicy.RoundRobin => new RoundRobinInclusiveCacheReplacementState(params)
 +    }
++  }
 +}
 \ No newline at end of file

@@ -233,7 +233,9 @@ A policy class implements the hooks the patch calls from `Directory`/`MSHR`:
 | `acceptedHit` | a lookup hit a way, so update recency |
 | `allocation` | a fill inserts a new line, so choose its initial position (BIP lives here) |
 | `invalidation` | a line is removed, so clear its state |
-| `victimWayOH` | an eviction is needed: return the chosen way as a **one-hot** vector |
+| `victimWayOH(readEnable, resultValid, set)` | an eviction is needed for set `set`: return the chosen way as a **one-hot** vector |
+
+A complete, working example is `l2-replacement/replacement/RoundRobinDemo.scala` (per-set pointer in a `Mem`, updated on `allocation`, read in `victimWayOH`). Copy its structure for the real policies. Select it with `L2RoundRobinDemoReplacementConfig`.
 
 Typical translation of ideas to Chisel:
 

@@ -1,4 +1,4 @@
-﻿# Current Project State
+# Current Project State
 
 L2 cache replacement-policy project for Chipyard 1.14.0, targeting
 `chipsalliance/rocket-chip-inclusive-cache` pinned at commit `85420cf`.
@@ -6,11 +6,11 @@ All project files live under `student-work/l2-replacement/`, following the
 repository README's student-work policy. No instructor config, docs, or shared
 scripts are modified.
 
-**Status: scaffolding complete, no policy algorithm implemented, nothing yet
-built or simulated end to end.** Docker and a RISC-V toolchain were unavailable
-during development, so the patch was only checked to apply cleanly to the
-pinned sources, and the Python parsing/report logic was tested on mock data.
-The new Scala has not been compiled.
+**Status: scaffolding complete; Random (baseline) and a Round Robin demo are the
+only working policies.** The patch applies, and the Scala and Verilator builds
+for the Random config succeeded in the course container. The first end-to-end
+simulation with the corrected `+permissive` flags is being validated; see
+"Next steps". PLRU, TrueLRU, BIP and DIP are still stubs.
 
 ## What exists
 
@@ -19,8 +19,9 @@ The new Scala has not been compiled.
 | Policy selector (Random, PLRU, TrueLRU, BIP, DIP) | Done; Random is the default |
 | Shared replacement interface with separate hit / allocation / invalidation / victim hooks | Done |
 | BIP/DIP settings (MRU probability, leader sets per policy, PSEL width) with geometry validation | Done |
-| Five comparable simulation configs | Done |
+| Six comparable simulation configs (five policies + Round Robin demo) | Done |
 | Random policy (existing LFSR victim selection, bit-for-bit) | Implemented |
+| Round Robin demo (`RoundRobinDemo.scala`) | Fully implemented example to copy from |
 | PLRU, true LRU, BIP, DIP | **Stubs only** (fail elaboration with a clear message) |
 | L2 miss counter | Done (simulation-only, unverified) |
 | Seven microbenchmarks | Done (unbuilt) |
@@ -37,8 +38,9 @@ student-work/
 ├── Wiki/Current Project State.md        this file
 └── l2-replacement/
     ├── rocket-chip-inclusive-cache.patch   interface, hooks, validation, L2 monitor
-    ├── L2ReplacementConfigs.scala          the five configs
-    ├── replacement/                        policy stubs (edit these)
+    ├── L2ReplacementConfigs.scala          the six configs
+    ├── replacement/                        policy stubs (edit these) + demo
+    │   ├── RoundRobinDemo.scala            complete worked example
     │   ├── PLRUReplacement.scala
     │   ├── TrueLRUReplacement.scala
     │   ├── BIPReplacement.scala
@@ -75,6 +77,7 @@ Chipyard tree, refusing to overwrite any different existing file.
 | Config | Policy | Status |
 |---|---|---|
 | `L2RandomReplacementConfig` | Existing LFSR random | Implemented |
+| `L2RoundRobinDemoReplacementConfig` | Round Robin (teaching example) | Implemented |
 | `L2PLRUReplacementConfig` | PLRU | Stub |
 | `L2TrueLRUReplacementConfig` | True LRU | Stub |
 | `L2BIPReplacementConfig` | BIP | Stub |
@@ -113,7 +116,7 @@ BENCHMARKS=reuse,stream_pollution,phase_change \
 bash /workspace/student-work/l2-replacement/run-test-suite
 ```
 
-Currently only Random yields data; every other policy row is `unsupported`.
+Random and Round Robin yield data; PLRU, TrueLRU, BIP and DIP rows are `unsupported`.
 
 ## Microbenchmarks
 
@@ -145,7 +148,8 @@ Limits:
   boundaries are approximate.
 - A trailing partial 64-access window is dropped.
 - The counter is simulation-only (printf) and does not affect cache behavior.
-- It has not been confirmed that `+verbose` emits these prints in the real build.
+- `+verbose` is passed inside `+permissive ... +permissive-off` (fesvr otherwise treats it as the program name). It also enables a per-instruction core trace, which the runner filters out of the log.
+- The elaborated geometry is printed as `[L2Replacement] policy=... sets=... ways=...` and copied into the report header (`L2 cache:`); verify it matches the assumed 512 KiB / 8-way.
 
 ## Output
 
@@ -155,10 +159,10 @@ Limits:
   speedup, D-cache and L2 misses, L2 MPKI, miss reduction, checksum match,
   status).
 - Report: `run_MM_DD_HH_MM.txt`, an aligned summary table plus per-phase table.
-  `run-and-export.ps1` bind-mounts `Desktop\Chipyard-UA\Output` at
+  The whole results directory is also copied to `run_<stamp>_files` next to the report. `run-and-export.ps1` bind-mounts `Desktop\Chipyard-UA\Output` at
   `/workspace/export` via `compose.export.yaml` (an override; the shared
   `compose.yaml` is unchanged). Without that mount the report goes to
-  `student-work/l2-replacement/results/`.
+  `student-work/l2-replacement/results/` (gitignored).
 
 If an earlier version of the patch is already applied to the InclusiveCache
 checkout, reset it first so the runner can apply the current one:
@@ -169,8 +173,7 @@ git -C generators/rocket-chip-inclusive-cache checkout . && git -C generators/ro
 
 ## Next steps
 
-1. Run the suite in the container; confirm the patch builds, the Random
-   baseline simulates, and `+verbose` produces `L2WINDOW` lines.
+1. Confirm the Random baseline and Round Robin demo simulate and `+verbose` produces `L2WINDOW` lines.
 2. Check the metrics/comparison CSVs against real simulator output.
 3. Implement true LRU, then BIP, PLRU, and DIP in `replacement/`.
 4. Add a reduced-size benchmark option if Verilator runs are too slow.

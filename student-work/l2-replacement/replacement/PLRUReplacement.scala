@@ -28,7 +28,7 @@ class PLRUInclusiveCacheReplacementState(params: InclusiveCacheParameters)
   extends InclusiveCacheReplacementState(params) {
   InclusiveCacheReplacementState.unimplemented(InclusiveCacheReplacementPolicy.PLRU)
 
-  def victimWayOH(readEnable: Bool, resultValid: Bool): UInt = ???
+  def victimWayOH(readEnable: Bool, resultValid: Bool, set: UInt): UInt = ???
   def acceptedHit(set: UInt, way: UInt, enable: Bool): Unit = ???
   def allocation(set: UInt, way: UInt, enable: Bool): Unit = ???
   def invalidation(set: UInt, way: UInt, enable: Bool): Unit = ???

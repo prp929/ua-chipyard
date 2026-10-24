@@ -23,7 +23,9 @@ static volatile uint64_t data[DATA_WORDS];
 static void initialize_data(void)
 {
     size_t i;
-    for (i = 0; i < DATA_WORDS; ++i)
+    /* Only the first word of each line is ever read, so skip the rest to keep
+     * Verilator startup time down. */
+    for (i = 0; i < DATA_WORDS; i += CACHE_LINE_WORDS)
         data[i] = (uint64_t)i ^ 0x9e3779b97f4a7c15ULL;
 }
 
@@ -32,7 +34,7 @@ static inline uint64_t read_line(size_t line)
     return data[line * CACHE_LINE_WORDS];
 }
 
-static uint64_t sweep_lines(size_t line_count, unsigned repetitions)
+__attribute__((unused)) static uint64_t sweep_lines(size_t line_count, unsigned repetitions)
 {
     uint64_t sum = 0;
     unsigned rep;
@@ -44,7 +46,7 @@ static uint64_t sweep_lines(size_t line_count, unsigned repetitions)
     return sum;
 }
 
-static uint64_t access_conflicting_lines(size_t line_count, unsigned repetitions)
+__attribute__((unused)) static uint64_t access_conflicting_lines(size_t line_count, unsigned repetitions)
 {
     uint64_t sum = 0;
     unsigned rep;

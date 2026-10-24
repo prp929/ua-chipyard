@@ -56,3 +56,9 @@ class L2DIPReplacementConfig extends Config(
   new WithInclusiveCacheReplacementPolicy(InclusiveCacheReplacementPolicy.DIP) ++
   new L2ReplacementBaseConfig
 )
+
+/** Fully implemented worked example; compare your own policies against it. */
+class L2RoundRobinDemoReplacementConfig extends Config(
+  new WithInclusiveCacheReplacementPolicy(InclusiveCacheReplacementPolicy.RoundRobin) ++
+  new L2ReplacementBaseConfig
+)

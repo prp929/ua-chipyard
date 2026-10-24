@@ -16,8 +16,10 @@ CONFIG_SOURCE="$PROJECT_DIR/L2ReplacementConfigs.scala"
 CONFIG_LINK="${CONFIG_LINK:-$CHIPYARD_ROOT/generators/chipyard/src/main/scala/config/L2ReplacementConfigs.scala}"
 
 BASELINES="${BASELINES:-L2RandomReplacementConfig}"
-POLICIES="${POLICIES:-L2PLRUReplacementConfig,L2TrueLRUReplacementConfig,L2BIPReplacementConfig,L2DIPReplacementConfig}"
+POLICIES="${POLICIES:-L2RoundRobinDemoReplacementConfig,L2PLRUReplacementConfig,L2TrueLRUReplacementConfig,L2BIPReplacementConfig,L2DIPReplacementConfig}"
 BENCHMARKS="${BENCHMARKS:-reuse,streaming,stream_pollution,capacity,conflict,phase_change,mixed}"
+# Seconds before a single simulation is killed (recorded as run_failed).
+SIM_TIMEOUT="${SIM_TIMEOUT:-7200}"
 
 IFS=',' read -r -a baseline_configs <<< "$BASELINES"
 IFS=',' read -r -a policy_configs <<< "$POLICIES"
@@ -41,12 +43,19 @@ fi
 
 if git -C "$CACHE_REPO" apply --reverse --check "$REPLACEMENT_PATCH" >/dev/null 2>&1; then
     echo "InclusiveCache replacement patch already applied."
-elif git -C "$CACHE_REPO" apply --check "$REPLACEMENT_PATCH"; then
-    git -C "$CACHE_REPO" apply "$REPLACEMENT_PATCH"
-    echo "Applied InclusiveCache replacement patch."
 else
-    echo "Could not apply the replacement patch; check the InclusiveCache worktree." >&2
-    exit 1
+    if ! git -C "$CACHE_REPO" apply --check "$REPLACEMENT_PATCH" >/dev/null 2>&1; then
+        # An older version of the patch (or a stray edit) is in the checkout; the
+        # pinned cache sources are owned by this project, so restore them.
+        echo "Resetting InclusiveCache sources before applying the patch."
+        git -C "$CACHE_REPO" checkout -q -- . || exit 1
+        git -C "$CACHE_REPO" clean -fdq -- design/craft/inclusivecache/src || exit 1
+    fi
+    if ! git -C "$CACHE_REPO" apply "$REPLACEMENT_PATCH"; then
+        echo "Could not apply the replacement patch; check the InclusiveCache worktree." >&2
+        exit 1
+    fi
+    echo "Applied InclusiveCache replacement patch."
 fi
 
 if [ -L "$CONFIG_LINK" ]; then
@@ -73,7 +82,10 @@ for policy_file in "$PROJECT_DIR"/replacement/*.scala; do
     ln -s "$policy_file" "$link" || exit 1
 done
 if [ -f "$CHIPYARD_ROOT/env.sh" ]; then
+    # conda's activate/deactivate hooks reference unset variables
+    set +u
     source "$CHIPYARD_ROOT/env.sh" >/dev/null
+    set -u
 fi
 benchmark_list="${BENCHMARKS//,/ }"
 if ! make -C "$MICRO_BENCH_DIR" \
@@ -98,7 +110,14 @@ run_configuration() {
     local simulator="$SIM_DIR/simulator-chipyard.harness-${config}"
 
     echo "[$role] Building $config"
-    if ! make -C "$SIM_DIR" "CONFIG=$config" >"$build_log" 2>&1; then
+    make -C "$SIM_DIR" "CONFIG=$config" >"$build_log" 2>&1
+    local build_status=$?
+    # Elaboration prints the cache geometry; keep it for the report because
+    # cached builds will not print it again.
+    local geometry_line
+    geometry_line="$(grep -ah '^\[L2Replacement\]' "$build_log" | head -1)"
+    [ -n "$geometry_line" ] && echo "$geometry_line" > "$OUTPUT_DIR/l2-geometry-${config}.txt"
+    if [ "$build_status" -ne 0 ]; then
         if grep -Fq "is not implemented at this revision" "$build_log"; then
             echo "[$role] $config is not implemented yet; recorded as unsupported."
             for benchmark in "${benchmarks[@]}"; do
@@ -134,7 +153,12 @@ run_configuration() {
         fi
 
         echo "[$role] Running $config on $benchmark"
-        if "$simulator" +verbose "$program" >"$run_log" 2>&1; then
+        # +verbose enables the hardware printf (L2WINDOW) but also a per-instruction
+        # core trace ("C0: ..."), which is dropped here to keep logs small.
+        timeout "$SIM_TIMEOUT" "$simulator" +permissive +verbose +permissive-off "$program" 2>&1 \
+            | grep -a -v -E '^C[0-9]+: ' >"$run_log"
+        sim_status=${PIPESTATUS[0]}
+        if [ "$sim_status" -eq 0 ]; then
             parse_run_log "$role" "$config" "$benchmark" "ok" "$run_log"
         else
             echo "[$role] Simulation failed for $config / $benchmark; see $run_log" >&2
@@ -253,12 +277,19 @@ PY
 
 EXPORT_DIR="${EXPORT_DIR:-/workspace/export}"
 [ -d "$EXPORT_DIR" ] && [ -w "$EXPORT_DIR" ] || EXPORT_DIR="$PROJECT_DIR/results"
-report_file="$EXPORT_DIR/run_$(date +%m_%d_%H_%M).txt"
+stamp="$(date +%m_%d_%H_%M)"
+report_file="$EXPORT_DIR/run_${stamp}.txt"
+l2_geometry="$(cat "$OUTPUT_DIR"/l2-geometry-*.txt 2>/dev/null | head -1 \
+    | sed -E 's/^\[L2Replacement\] policy=.* sets=/sets=/')"
+[ -n "$l2_geometry" ] || l2_geometry="unknown (no build in this checkout has printed it yet)"
 mkdir -p "$EXPORT_DIR" && python3 "$PROJECT_DIR/format_report.py" \
     "$comparison_file" "$metrics_file" \
-    "Date:       $(date)" "Baselines:  $BASELINES" \
+    "Date:       $(date)" "L2 cache:   $l2_geometry" "Baselines:  $BASELINES" \
     "Policies:   $POLICIES" "Benchmarks: $BENCHMARKS" > "$report_file"
-echo "Report: $report_file"echo "Raw metrics: $metrics_file"
+# Container-local results disappear with a --rm container, so keep a copy next to the report.
+cp -r "$RESULTS_DIR" "$EXPORT_DIR/run_${stamp}_files" 2>/dev/null
+echo "Report: $report_file"
+echo "Raw metrics: $metrics_file"
 echo "Baseline comparisons: $comparison_file"
 echo "Simulator logs: $RESULTS_DIR"
 if [ "$overall_failure" -ne 0 ]; then
