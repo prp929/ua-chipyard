@@ -89,6 +89,8 @@ If there are **no `L2WINDOW` lines**, the simulator is not printing hardware `pr
 
 `QUICK=1` builds smaller workloads (1 MiB data set, which is still 2x the 512 KiB L2, and about 4x fewer repetitions) into `/workspace/output/replacement-benchmarks-quick`, so the full-size ELFs are left alone. Use it for smoke tests; the report header shows `Quick mode: 1`. Quick numbers must not be compared against full-size numbers.
 
+A quick `reuse` run for two configs takes about 10 minutes of simulation. The data array sits at a fixed DRAM address instead of `.bss` because the simulator loader writes `.bss` very slowly (a 1-2 MiB array otherwise takes hours). Checksums are therefore always 0; that is expected.
+
 ```bash
 QUICK=1 BASELINES=L2RandomReplacementConfig POLICIES=L2RoundRobinDemoReplacementConfig BENCHMARKS=reuse \
   bash run-test-suite

@@ -24,7 +24,7 @@ simulation with the corrected `+permissive` flags is being validated; see
 | Round Robin demo (`RoundRobinDemo.scala`) | Fully implemented example to copy from |
 | PLRU, true LRU, BIP, DIP | **Stubs only** (fail elaboration with a clear message) |
 | L2 miss counter | Done (simulation-only, unverified) |
-| Seven microbenchmarks (plus `QUICK=1` smaller variants) | Done; full size builds, quick mode untested |
+| Seven microbenchmarks (plus `QUICK=1` smaller variants) | Done; quick mode tested on `reuse` |
 | Master suite runner and report export | Done; end-to-end run being validated |
 
 Key finding: the pinned InclusiveCache picks victims with an LFSR (random). It
@@ -149,7 +149,18 @@ Random and Round Robin yield data; PLRU, TrueLRU, BIP and DIP rows are `unsuppor
 set, about a quarter of the repetitions) into
 `/workspace/output/replacement-benchmarks-quick` for fast smoke tests. The report
 header shows `Quick mode: 1`. Never compare quick results with full-size ones.
-It is implemented but not yet tested.
+Tested on `reuse` only (Random vs RoundRobin): about 5 minutes of wall time,
+about 1.04M simulated cycles.
+
+**Data array placement (important):** the Verilator program loader writes the
+whole ELF LOAD segment, including zero-filled `.bss`, at roughly 1.4k simulated
+cycles/s, so a 1-2 MiB `.bss` array took tens of minutes to hours (or never
+finished). The array now lives at a fixed DRAM address (`DATA_BASE`, default
+`0x88000000`; DRAM is 256 MiB at `0x80000000`) and is not in the ELF
+(about 9 KB). `initialize_data()` is empty because DRAM reads as zero, so the
+checksum is always 0. It still proves policies don't change results, but it is
+a weak check. `CHECKSUM` prints with `%lu` because newlib-nano printf does not
+support `%llu`.
 The benchmarks use the course's `metrics.h`/`hpm.h`, whose counters measure
 core and L1 events (the cache-miss event is D-cache, not L2).
 
@@ -163,8 +174,14 @@ attributes each L2 window to the phase containing its cycle.
 
 Limits:
 
-- The cache cycle counter and core `mcycle` may be offset slightly, so phase
-  boundaries are approximate.
+- The cache cycle counter counts from reset while `mcycle` counts from core
+  release (after the program load), so they differ by a large offset.
+  `parse_run_log.py` (`clock_offset()`) searches for the shift that makes each
+  phase's L2 accesses best match its L1 miss count (`ic_miss + dc_miss`). Phase
+  boundaries are therefore approximate, and the attribution assumes L1 misses
+  roughly equal L2 accesses. Quick `reuse` check: 8192 L2 accesses vs 8195
+  D-cache misses.
+- The window regex allows padding spaces (`L2WINDOW,     13944, 64,  8`).
 - A trailing partial 64-access window is dropped.
 - The counter is simulation-only (printf) and does not affect cache behavior.
 - `+verbose` is passed inside `+permissive ... +permissive-off` (fesvr otherwise treats it as the program name). It also enables a per-instruction core trace, which the runner filters out of the log.
@@ -195,5 +212,5 @@ git -C generators/rocket-chip-inclusive-cache checkout . && git -C generators/ro
 1. Confirm the Random baseline and Round Robin demo simulate and `+verbose` produces `L2WINDOW` lines.
 2. Check the metrics/comparison CSVs against real simulator output.
 3. Implement true LRU, then BIP, PLRU, and DIP in `replacement/`.
-4. Test quick mode (`QUICK=1`); a full-size `reuse` run under Verilator takes a long time.
+4. Run the other six benchmarks in quick mode, then time a full-size run (now that the array is out of `.bss`).
 5. Verify functional correctness before trusting any performance comparison.

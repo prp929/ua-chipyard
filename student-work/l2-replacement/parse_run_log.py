@@ -33,7 +33,7 @@ def parse(role, config, benchmark, status, log_path):
         for line in log:
             if (m := re.search(r"PHASEWIN,(\w+),(\d+),(\d+)", line)):
                 windows[m.group(1)] = (int(m.group(2)), int(m.group(3)))
-            elif (m := re.search(r"L2WINDOW,(\d+),(\d+),(\d+)", line)):
+            elif (m := re.search(r"L2WINDOW,\s*(\d+),\s*(\d+),\s*(\d+)", line)):
                 l2.append(tuple(int(g) for g in m.groups()))
             elif (m := re.match(r"CHECKSUM,(\d+)", line)):
                 checksum = m.group(1)
@@ -43,11 +43,12 @@ def parse(role, config, benchmark, status, log_path):
                         all(t.isdigit() for t in tokens[1:])):
                     rows[tokens[0]] = tokens[1:]
 
+    offset = clock_offset(l2, rows, windows)
     out = []
     for phase, values in rows.items():
         if phase not in windows:
             continue
-        start, end = windows[phase]
+        start, end = (w + offset for w in windows[phase])
         access = sum(a for c, a, _ in l2 if start < c <= end) if l2 else ""
         miss = sum(x for c, _, x in l2 if start < c <= end) if l2 else ""
         out.append([role, config, benchmark, phase, *values, access, miss, "", status])
@@ -57,6 +58,31 @@ def parse(role, config, benchmark, status, log_path):
     if not rows:
         out.append(status_row(role, config, benchmark, status))
     return out
+
+
+def clock_offset(l2, rows, windows, step=250):
+    """The cache counts cycles from reset, mcycle from core release (after the
+    program load). Pick the shift that makes each phase's L2 accesses best match
+    its L1 miss count (ic_miss + dc_miss)."""
+    if not l2:
+        return 0
+    idx = {name: i for i, name in enumerate(HPM_FIELDS)}
+    targets = []
+    for phase, values in rows.items():
+        if phase in windows:
+            want = int(values[idx["ic_miss"]]) + int(values[idx["dc_miss"]])
+            targets.append((windows[phase], want))
+    if not targets:
+        return 0
+    best, best_cost = 0, None
+    for offset in range(0, l2[-1][0], step):
+        cost = 0
+        for (s, e), want in targets:
+            got = sum(a for c, a, _ in l2 if s + offset < c <= e + offset)
+            cost += abs(got - want)
+        if best_cost is None or cost < best_cost:
+            best, best_cost = offset, cost
+    return best
 
 
 def status_row(role, config, benchmark, status):

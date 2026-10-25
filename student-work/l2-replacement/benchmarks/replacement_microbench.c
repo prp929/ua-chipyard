@@ -25,15 +25,19 @@
 #define HOT_LINES (HOT_BYTES / CACHE_LINE_BYTES)
 
 volatile uint64_t sink;
-static volatile uint64_t data[DATA_WORDS];
+/* The array is placed at a fixed DRAM address instead of in .bss. A .bss array
+ * becomes part of the ELF's loaded segment, and the simulator's loader zero-fills
+ * it over a slow serial link before main() runs (minutes per MiB). DRAM is
+ * 256 MiB at 0x80000000, so this address stays inside it. DRAM reads as
+ * zero until written, so the values are identical for every policy. */
+#ifndef DATA_BASE
+#define DATA_BASE 0x88000000UL
+#endif
+#define data ((volatile uint64_t *)DATA_BASE)
 
 static void initialize_data(void)
 {
-    size_t i;
-    /* Only the first word of each line is ever read, so skip the rest to keep
-     * Verilator startup time down. */
-    for (i = 0; i < DATA_WORDS; i += CACHE_LINE_WORDS)
-        data[i] = (uint64_t)i ^ 0x9e3779b97f4a7c15ULL;
+    /* Deliberately empty: see DATA_BASE above. */
 }
 
 static inline uint64_t read_line(size_t line)
@@ -130,6 +134,6 @@ int main(void)
 #error "Unknown WORKLOAD value."
 #endif
 
-    printf("CHECKSUM,%llu\n", (unsigned long long)sink);
+    printf("CHECKSUM,%lu\n", (unsigned long)sink);
     return 0;
 }
