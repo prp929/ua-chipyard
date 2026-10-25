@@ -59,6 +59,7 @@ student-work/
 |---|---|
 | `Current Project State.md` | This page: what is done, what is not |
 | `How to Run.md` | Commands to build, run and check the project (including quick mode) |
+| `Benchmarks.md` | Workload patterns, intended purpose, origins, and measurement caveats |
 | `How Chipyard Works.md` | How Chipyard, configs and generators fit together |
 | `How Make Files Work.md` | Reading the Makefiles used by Chipyard and the benchmarks |
 | `Scala Basics.md` | Scala and Chisel syntax needed to write a policy |
