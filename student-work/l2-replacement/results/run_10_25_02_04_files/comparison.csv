@@ -1,0 +1,2 @@
+baseline,policy,benchmark,baseline_cycles,policy_cycles,cycles_speedup,baseline_dc_miss,policy_dc_miss,baseline_l2_miss,policy_l2_miss,baseline_l2_mpki,policy_l2_mpki,l2_miss_reduction_pct,checksum_match,status
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,reuse,190989,190953,1.000189,8195,8195,,,,,,true,ok

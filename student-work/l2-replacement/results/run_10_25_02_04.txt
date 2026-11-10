@@ -1,0 +1,23 @@
+L2 Replacement-Policy Test Report
+=================================
+Date:       Sun Oct 25 02:04:50 UTC 2026
+L2 cache:   sets=1024 ways=8 blockBytes=64 sizeKiB=512
+Baselines:  L2RandomReplacementConfig
+Policies:   L2RoundRobinDemoReplacementConfig
+Benchmarks: reuse
+Quick mode: 1
+
+SUMMARY (one row per benchmark / baseline / policy)
+---------------------------------------------------
+benchmark  baseline                   policy                             baseline_cycles  policy_cycles  cycles_speedup  baseline_l2_miss  policy_l2_miss  l2_miss_reduction_pct  checksum_match  status
+---------  -------------------------  ---------------------------------  ---------------  -------------  --------------  ----------------  --------------  ---------------------  --------------  ------
+reuse      L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig           190989         190953        1.000189                 -               -                      -            true      ok
+
+PER-PHASE METRICS
+-----------------
+benchmark  config                             phase  cycles  instret  dc_miss  l2_access  l2_miss  status
+---------  ---------------------------------  -----  ------  -------  -------  ---------  -------  ------
+reuse      L2RandomReplacementConfig          reuse  190989    32844     8195          -        -      ok
+reuse      L2RoundRobinDemoReplacementConfig  reuse  190953    32844     8195          -        -      ok
+
+Notes: '-' means no value (e.g. unsupported policy). L2 counts come from L2AccessMonitor in 64-access windows.

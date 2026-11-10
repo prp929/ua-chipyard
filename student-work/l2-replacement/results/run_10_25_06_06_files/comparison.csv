@@ -1,0 +1,7 @@
+baseline,policy,benchmark,baseline_cycles,policy_cycles,cycles_speedup,baseline_dc_miss,policy_dc_miss,baseline_l2_miss,policy_l2_miss,baseline_l2_mpki,policy_l2_mpki,l2_miss_reduction_pct,checksum_match,status
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,streaming,507140,500429,1.013410,16387,16387,14137,14180,215.6707,216.3267,-0.3042,true,ok
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,stream_pollution,559668,554029,1.010178,18438,18438,13900,13879,188.4158,188.1312,0.1511,true,ok
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,capacity,1594742,1557956,1.023612,54280,54280,33241,30134,153.0764,138.7685,9.3469,true,ok
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,conflict,17659,19221,0.918735,642,642,205,314,72.1577,110.5245,-53.1707,true,ok
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,phase_change,607192,601115,1.010110,20486,20486,16389,16436,199.8975,200.4708,-0.2868,true,ok
+L2RandomReplacementConfig,L2RoundRobinDemoReplacementConfig,mixed,692713,686431,1.009152,17406,17406,13907,13906,76.2922,76.2867,0.0072,true,ok

@@ -1,0 +1,53 @@
+testing $random e23cbb39
+L2WINDOW,               13944, 64,         8
+L2WINDOW,               27064, 64,         8
+L2WINDOW,               40209, 64,         8
+L2WINDOW,               53329, 64,         8
+L2WINDOW,               66474, 64,         8
+L2WINDOW,               79594, 64,         8
+L2WINDOW,               92739, 64,         8
+L2WINDOW,              105859, 64,         8
+L2WINDOW,              119004, 64,         8
+L2WINDOW,              132124, 64,         8
+L2WINDOW,              145269, 64,         8
+L2WINDOW,              158389, 64,         8
+L2WINDOW,              171534, 64,         8
+L2WINDOW,              184654, 64,         8
+L2WINDOW,              197799, 64,         8
+L2WINDOW,              210919, 64,         8
+L2WINDOW,              224064, 64,         8
+L2WINDOW,              237209, 64,         8
+L2WINDOW,              249581, 64,         8
+L2WINDOW,              251714, 64,        16
+L2WINDOW,              253095, 64,         1
+L2WINDOW,              254457, 64,         0
+L2WINDOW,              255842, 64,         0
+L2WINDOW,              257204, 64,         0
+L2WINDOW,              259252, 64,        12
+L2WINDOW,              268339, 64,         1
+L2WINDOW,              279549, 64,         1
+phase          cycles    instret     branch       load        mul  bp_dir_ms  bp_tgt_ms   md_stall    ic_miss    dc_miss
+L2WINDOW,              289924, 64,         0
+L2WINDOW,              301909, 64,         0
+L2WINDOW,              312759, 64,         0
+ways_8           6157       1165        288        257          0        255          2          0          2        257
+L2WINDOW,              322654, 64,         0
+PHASEWIN,ways_8,1801,7957
+L2WINDOW,              328858, 64,        11
+L2WINDOW,              330538, 64,        32
+L2WINDOW,              332243, 64,        34
+L2WINDOW,              333909, 64,        31
+L2WINDOW,              335637, 64,        37
+L2WINDOW,              337356, 64,        35
+L2WINDOW,              339073, 64,        35
+L2WINDOW,              346379, 64,        13
+L2WINDOW,              358599, 64,         0
+ways_12         11502       1676        416        385          0        383          2          0          1        385
+L2WINDOW,              369314, 64,         0
+L2WINDOW,              379094, 64,         0
+PHASEWIN,ways_12,78906,90407
+CHECKSUM,0
+L2WINDOW,              388849, 64,         0
+*** PASSED *** Completed after               781066 simulation cycles
+[UART] UART0 is here (stdin/stdout).
+- /workspace/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.L2RandomReplacementConfig/gen-collateral/TestDriver.v:158: Verilog $finish

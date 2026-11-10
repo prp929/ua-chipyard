@@ -1,0 +1,54 @@
+L2 Replacement-Policy Test Report
+=================================
+Date:       Sun Oct 25 06:06:45 UTC 2026
+L2 cache:   sets=1024 ways=8 blockBytes=64 sizeKiB=512
+Baselines:  L2RandomReplacementConfig
+Policies:   L2RoundRobinDemoReplacementConfig
+Benchmarks: streaming,stream_pollution,capacity,conflict,phase_change,mixed
+Quick mode: 1
+
+SUMMARY (one row per benchmark / baseline / policy)
+---------------------------------------------------
+benchmark         baseline                   policy                             baseline_cycles  policy_cycles  cycles_speedup  baseline_l2_miss  policy_l2_miss  l2_miss_reduction_pct  checksum_match  status
+----------------  -------------------------  ---------------------------------  ---------------  -------------  --------------  ----------------  --------------  ---------------------  --------------  ------
+streaming         L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig           507140         500429        1.013410             14137           14180                -0.3042            true      ok
+stream_pollution  L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig           559668         554029        1.010178             13900           13879                 0.1511            true      ok
+capacity          L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig          1594742        1557956        1.023612             33241           30134                 9.3469            true      ok
+conflict          L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig            17659          19221        0.918735               205             314               -53.1707            true      ok
+phase_change      L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig           607192         601115        1.010110             16389           16436                -0.2868            true      ok
+mixed             L2RandomReplacementConfig  L2RoundRobinDemoReplacementConfig           692713         686431        1.009152             13907           13906                 0.0072            true      ok
+
+PER-PHASE METRICS
+-----------------
+benchmark         config                             phase        cycles  instret  dc_miss  l2_access  l2_miss  status
+----------------  ---------------------------------  ----------  -------  -------  -------  ---------  -------  ------
+streaming         L2RandomReplacementConfig          stream       507140    65549    16387      16384    14137      ok
+stream_pollution  L2RandomReplacementConfig          hot_before    26019     4113     1026        128       16      ok
+stream_pollution  L2RandomReplacementConfig          stream       505250    65548    16386      16384    12985      ok
+stream_pollution  L2RandomReplacementConfig          hot_after     28399     4112     1026       1024      899      ok
+capacity          L2RandomReplacementConfig          cap_32k       26016     4113     1026       1024      917      ok
+capacity          L2RandomReplacementConfig          cap_128k     102317    16400     4098       3264      666      ok
+capacity          L2RandomReplacementConfig          cap_512k     457674    65552    16386      16704     8992      ok
+capacity          L2RandomReplacementConfig          cap_2m      1008735   131088    32770      32768    22666      ok
+conflict          L2RandomReplacementConfig          ways_8         6157     1165      257        256       25      ok
+conflict          L2RandomReplacementConfig          ways_12       11502     1676      385        384      180      ok
+phase_change      L2RandomReplacementConfig          reuse_a       49577     8220     2050       2048      254      ok
+phase_change      L2RandomReplacementConfig          stream       505683    65548    16386      18176    15888      ok
+phase_change      L2RandomReplacementConfig          reuse_b       51932     8219     2050       2048      247      ok
+mixed             L2RandomReplacementConfig          mixed        692713   182286    17406      17408    13907      ok
+streaming         L2RoundRobinDemoReplacementConfig  stream       500429    65549    16387      16384    14180      ok
+stream_pollution  L2RoundRobinDemoReplacementConfig  hot_before    25981     4113     1026        128       16      ok
+stream_pollution  L2RoundRobinDemoReplacementConfig  stream       498592    65548    16386      16384    12967      ok
+stream_pollution  L2RoundRobinDemoReplacementConfig  hot_after     29456     4112     1026       1024      896      ok
+capacity          L2RoundRobinDemoReplacementConfig  cap_32k       25981     4113     1026       1088      579      ok
+capacity          L2RoundRobinDemoReplacementConfig  cap_128k     100797    16400     4098       2944      327      ok
+capacity          L2RoundRobinDemoReplacementConfig  cap_512k     402501    65552    16386      16512     4419      ok
+capacity          L2RoundRobinDemoReplacementConfig  cap_2m      1028677   131088    32770      32768    24809      ok
+conflict          L2RoundRobinDemoReplacementConfig  ways_8         6080     1165      257        256       18      ok
+conflict          L2RoundRobinDemoReplacementConfig  ways_12       13141     1676      385        384      296      ok
+phase_change      L2RoundRobinDemoReplacementConfig  reuse_a       49531     8220     2050       2048      245      ok
+phase_change      L2RoundRobinDemoReplacementConfig  stream       498531    65548    16386      18176    15875      ok
+phase_change      L2RoundRobinDemoReplacementConfig  reuse_b       53053     8219     2050       2048      316      ok
+mixed             L2RoundRobinDemoReplacementConfig  mixed        686431   182286    17406      17408    13906      ok
+
+Notes: '-' means no value (e.g. unsupported policy). L2 counts come from L2AccessMonitor in 64-access windows.

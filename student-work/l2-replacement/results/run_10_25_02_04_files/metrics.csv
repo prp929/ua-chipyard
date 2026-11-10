@@ -1,0 +1,5 @@
+role,config,benchmark,phase,cycles,instret,branch,load,mul,bp_dir_ms,bp_tgt_ms,md_stall,ic_miss,dc_miss,l2_access,l2_miss,checksum,status
+baseline,L2RandomReplacementConfig,reuse,reuse,190989,32844,8208,8193,0,8191,2,0,2,8195,,,,ok
+baseline,L2RandomReplacementConfig,reuse,CHECKSUM,,,,,,,,,,,,,0,ok
+policy,L2RoundRobinDemoReplacementConfig,reuse,reuse,190953,32844,8208,8193,0,8191,2,0,2,8195,,,,ok
+policy,L2RoundRobinDemoReplacementConfig,reuse,CHECKSUM,,,,,,,,,,,,,0,ok
