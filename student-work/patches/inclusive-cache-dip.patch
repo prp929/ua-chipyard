@@ -1,0 +1,211 @@
+diff --git a/design/craft/inclusivecache/src/Configs.scala b/design/craft/inclusivecache/src/Configs.scala
+index e01fcdd..d49760e 100644
+--- a/design/craft/inclusivecache/src/Configs.scala
++++ b/design/craft/inclusivecache/src/Configs.scala
+@@ -42,11 +42,13 @@ case class InclusiveCacheParams(
+   bufInnerInterior: InclusiveCachePortParameters = InclusiveCachePortParameters.fullC,
+   bufInnerExterior: InclusiveCachePortParameters = InclusiveCachePortParameters.flowAD,
+   bufOuterInterior: InclusiveCachePortParameters = InclusiveCachePortParameters.full,
+-  bufOuterExterior: InclusiveCachePortParameters = InclusiveCachePortParameters.none)
++  bufOuterExterior: InclusiveCachePortParameters = InclusiveCachePortParameters.none,
++  policy: String = "dip")
+ 
+ case object InclusiveCacheKey extends Field[InclusiveCacheParams]
+ 
+ class WithInclusiveCache(
++  nBanks: Int = 1,
+   nWays: Int = 8,
+   capacityKB: Int = 512,
+   outerLatencyCycles: Int = 40,
+@@ -54,17 +56,19 @@ class WithInclusiveCache(
+   hintsSkipProbe: Boolean = false,
+   bankedControl: Boolean = false,
+   ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
+-  writeBytes: Int = 8
++  writeBytes: Int = 8,
++  policy: String = "dip"
+ ) extends Config((site, here, up) => {
+   case InclusiveCacheKey => InclusiveCacheParams(
+-      sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
++      sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * (if (nBanks > 1) nBanks else up(SubsystemBankedCoherenceKey, site).nBanks)),
+       ways = nWays,
+       memCycles = outerLatencyCycles,
+       writeBytes = writeBytes,
+       portFactor = subBankingFactor,
+       hintsSkipProbe = hintsSkipProbe,
+       bankedControl = bankedControl,
+-      ctrlAddr = ctrlAddr)
++      ctrlAddr = ctrlAddr,
++      policy = policy)
+   case SubsystemBankedCoherenceKey => up(SubsystemBankedCoherenceKey, site).copy(coherenceManager = { context =>
+     implicit val p = context.p
+     val sbus = context.tlBusWrapperLocationMap(SBUS)
+@@ -82,7 +86,8 @@ class WithInclusiveCache(
+       bufInnerInterior,
+       bufInnerExterior,
+       bufOuterInterior,
+-      bufOuterExterior) = p(InclusiveCacheKey)
++      bufOuterExterior,
++      policy) = p(InclusiveCacheKey)
+ 
+     val l2Ctrl = ctrlAddr.map { addr =>
+       InclusiveCacheControlParameters(
+@@ -103,7 +108,8 @@ class WithInclusiveCache(
+         portFactor = portFactor,
+         memCycles = memCycles,
+         innerBuf = bufInnerInterior,
+-        outerBuf = bufOuterInterior),
++        outerBuf = bufOuterInterior,
++        policy = policy),
+       l2Ctrl))
+ 
+     def skipMMIO(x: TLClientParameters) = {
+@@ -147,3 +153,12 @@ class WithInclusiveCache(
+     (filter.node, lastLevelNode, None)
+   })
+ })
++
++class WithInclusiveCachePolicy(policy: String) extends Config((site, here, up) => {
++  case InclusiveCacheKey => up(InclusiveCacheKey, site).copy(policy = policy)
++})
++
++class WithInclusiveCacheLRU extends WithInclusiveCachePolicy("lru")
++class WithInclusiveCacheBIP extends WithInclusiveCachePolicy("bip")
++class WithInclusiveCacheDIP extends WithInclusiveCachePolicy("dip")
++
+diff --git a/design/craft/inclusivecache/src/Directory.scala b/design/craft/inclusivecache/src/Directory.scala
+index b82011a..7fc3bdb 100644
+--- a/design/craft/inclusivecache/src/Directory.scala
++++ b/design/craft/inclusivecache/src/Directory.scala
+@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy._
+ import freechips.rocketchip.tilelink._
+ import MetaData._
+ import chisel3.experimental.dataview._
+-import freechips.rocketchip.util.DescribedSRAM
++import freechips.rocketchip.util.{DescribedSRAM, TrueLRU}
+ 
+ class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
+ {
+@@ -111,15 +111,17 @@ class Directory(params: InclusiveCacheParameters) extends Module
+   val tag = params.dirReg(RegEnable(io.read.bits.tag, ren), ren1)
+   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
+ 
+-  // Compute the victim way in case of an evicition
+-  val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
+-  val victimSums = Seq.tabulate(params.cache.ways) { i => ((1 << InclusiveCacheParameters.lfsrBits)*i / params.cache.ways).U }
+-  val victimLTE  = Cat(victimSums.map { _ <= victimLFSR }.reverse)
+-  val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways-1, 1), 1.U(1.W))
+-  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
+-  val victimWay = OHToUInt(victimWayOH)
+-  assert (!ren2 || victimLTE(0) === 1.U)
+-  assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === 0.U) // monotone
++  // --------------------------------------------------------------------------
++  // Stage 1: TrueLRU Replacement & Touch Logic
++  // --------------------------------------------------------------------------
++  val lru_logic = new TrueLRU(params.cache.ways)
++  val lru_state = RegInit(VecInit(Seq.fill(params.cache.sets)(0.U(lru_logic.nBits.W))))
++
++  // Read current set's recency state and derive victim way
++  val current_lru_state = lru_state(set)
++  val lru_victim_way = lru_logic.get_replace_way(current_lru_state)
++  val victimWay = lru_victim_way
++  val victimWayOH = UIntToOH(victimWay, params.cache.ways)
+   assert (!ren2 || PopCount(victimWayOH) === 1.U)
+ 
+   val setQuash = bypass_valid && bypass.set === set
+@@ -132,13 +134,79 @@ class Directory(params: InclusiveCacheParameters) extends Module
+   }.reverse)
+   val hit = hits.orR
+ 
++  val result_hit = hit || (setQuash && tagMatch && bypass.data.state =/= INVALID)
++  val hit_way = Mux(hit, OHToUInt(hits), bypass.way)
++
+   io.result.valid := ren2
+   io.result.bits.viewAsSupertype(chiselTypeOf(bypass.data)) := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, Mux1H(victimWayOH, ways)))
+-  io.result.bits.hit := hit || (setQuash && tagMatch && bypass.data.state =/= INVALID)
+-  io.result.bits.way := Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch, bypass.way, victimWay))
++  io.result.bits.hit := result_hit
++  io.result.bits.way := Mux(result_hit, hit_way, victimWay)
+ 
+   params.ccover(ren2 && setQuash && tagMatch, "DIRECTORY_HIT_BYPASS", "Bypassing write to a directory hit")
+   params.ccover(ren2 && setQuash && !tagMatch && wayMatch, "DIRECTORY_EVICT_BYPASS", "Bypassing a write to a directory eviction")
+ 
++  // --------------------------------------------------------------------------
++  // Stage 2: BIP & DIP Set Dueling Logic
++  // --------------------------------------------------------------------------
++  val policy = params.micro.policy.toLowerCase
++  val is_pure_lru = (policy == "lru").B
++  val is_pure_bip = (policy == "bip").B
++  val is_dip_mode = (!is_pure_lru && !is_pure_bip)
++
++  // BIP throttle: 5-bit counter
++  val bip_counter = RegInit(0.U(5.W))
++
++  // Set Dueling:
++  // Dedicated LRU sets (32 sets): set[9:5] === set[4:0]
++  // Dedicated BIP sets (32 sets): set[9:5] === ~set[4:0]
++  // Follower sets (960 sets): !is_lru_set && !is_bip_set
++  val is_lru_set = if (params.setBits >= 10) (set(9, 5) === set(4, 0)) else true.B
++  val is_bip_set = if (params.setBits >= 10) (set(9, 5) === (~set(4, 0))(4, 0)) else false.B
++
++  // 10-bit saturating counter PSEL, initialized to 512
++  val psel = RegInit(512.U(10.W))
++
++  when (is_dip_mode && ren2 && !result_hit) {
++    when (is_lru_set && psel < 1023.U) {
++      psel := psel + 1.U
++    } .elsewhen (is_bip_set && psel > 0.U) {
++      psel := psel - 1.U
++    }
++  }
++
++  // Follower decision & policy selection:
++  // Use BIP when:
++  // - Pure BIP mode
++  // - DIP mode on a dedicated BIP set
++  // - DIP mode on a follower set when psel(9) === 1.U
++  val use_bip = Mux(is_pure_lru, false.B,
++                Mux(is_pure_bip, true.B,
++                Mux(is_lru_set, false.B,
++                Mux(is_bip_set, true.B,
++                psel(9) === 1.U))))
++
++  // Connect recency state updates
++  when (ren2) {
++    when (result_hit) {
++      // On a hit: update recency state promoting hit_way to MRU
++      lru_state(set) := lru_logic.get_next_state(current_lru_state, hit_way)
++    } .otherwise {
++      // On an eviction / insertion:
++      when (use_bip) {
++        bip_counter := bip_counter + 1.U
++        when (bip_counter === 31.U) {
++          // Insert at MRU with probability 1/32
++          lru_state(set) := lru_logic.get_next_state(current_lru_state, victimWay)
++        } .otherwise {
++          // Insert at LRU with probability 31/32: state unchanged (retains LRU position)
++          lru_state(set) := current_lru_state
++        }
++      } .otherwise {
++        // TrueLRU insertion: insert at MRU
++        lru_state(set) := lru_logic.get_next_state(current_lru_state, victimWay)
++      }
++    }
++  }
++
+   def json: String = s"""{"clients":${params.clientBits},"mem":"${cc_dir.pathName}","clean":"${wipeDone.pathName}"}"""
+ }
+diff --git a/design/craft/inclusivecache/src/Parameters.scala b/design/craft/inclusivecache/src/Parameters.scala
+index 9f3f918..f7a5e02 100644
+--- a/design/craft/inclusivecache/src/Parameters.scala
++++ b/design/craft/inclusivecache/src/Parameters.scala
+@@ -120,7 +120,8 @@ case class InclusiveCacheMicroParameters(
+   portFactor: Int = 4,  // numSubBanks = (widest TL port * portFactor) / writeBytes
+   dirReg:     Boolean = false,
+   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.fullC, // or none
+-  outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full)   // or flowAE
++  outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full,   // or flowAE
++  policy:     String = "dip")
+ {
+   require (writeBytes > 0 && isPow2(writeBytes))
+   require (memCycles > 0)

@@ -1,0 +1,31 @@
+diff --git a/generators/chipyard/src/main/scala/config/RocketConfigs.scala b/generators/chipyard/src/main/scala/config/RocketConfigs.scala
+index b0cea36c..378f7105 100644
+--- a/generators/chipyard/src/main/scala/config/RocketConfigs.scala
++++ b/generators/chipyard/src/main/scala/config/RocketConfigs.scala
+@@ -124,3 +124,26 @@ class AsyncResetRocketConfig extends Config(
+     ("uncore", Seq("sbus", "mbus", "pbus", "fbus", "cbus", "obus", "implicit", "clock_tap"), Seq("tile")),
+   ) ++
+   new MulticlockRocketConfig)
++
++class EceProjectBaselineConfig extends Config(
++  new freechips.rocketchip.subsystem.WithInclusiveCache(nBanks = 1, nWays = 4, capacityKB = 256) ++
++  new freechips.rocketchip.rocket.WithNHugeCores(1) ++
++  new chipyard.config.AbstractConfig
++)
++
++class EceProjectLRUConfig extends Config(
++  new freechips.rocketchip.subsystem.WithInclusiveCacheLRU ++
++  new EceProjectBaselineConfig
++)
++
++class EceProjectBIPConfig extends Config(
++  new freechips.rocketchip.subsystem.WithInclusiveCacheBIP ++
++  new EceProjectBaselineConfig
++)
++
++class EceProjectDIPConfig extends Config(
++  new freechips.rocketchip.subsystem.WithInclusiveCacheDIP ++
++  new EceProjectBaselineConfig
++)
++
++
