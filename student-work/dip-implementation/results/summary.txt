@@ -1,0 +1,42 @@
+========================================================================================================
+ECE 462/562 PROJECT: 4-TIER REPLACEMENT POLICY EVALUATION SUMMARY (CYCLES)
+========================================================================================================
+Benchmark            Baseline (No L2)     LRU (256KB)          BIP (256KB)          DIP (256KB)         
+--------------------------------------------------------------------------------------------------------
+dhrystone.riscv      399776               225027               225027               225027              
+mm.riscv             ABORT/ERR            25255                25255                25255               
+qsort.riscv          218091               173402               173402               173402              
+spmv.riscv           ABORT/ERR            50254                50254                50254               
+vvadd.riscv          3521                 2476                 2476                 2476                
+thrash               257256               345977               294444               295993              
+========================================================================================================
+
+========================================================================================================
+DETAILED BREAKDOWN (CYCLES & INSTRUCTIONS)
+========================================================================================================
+Benchmark            Configuration                Cycles (mcycle)    Instret (minstret)
+--------------------------------------------------------------------------------------------------------
+dhrystone.riscv      BaselineConfig               399776             186031            
+dhrystone.riscv      EceProjectLRUConfig          225027             186031            
+dhrystone.riscv      EceProjectBIPConfig          225027             186031            
+dhrystone.riscv      EceProjectDIPConfig          225027             186031            
+mm.riscv             BaselineConfig               ABORT/ERR          N/A               
+mm.riscv             EceProjectLRUConfig          25255              24744             
+mm.riscv             EceProjectBIPConfig          25255              24744             
+mm.riscv             EceProjectDIPConfig          25255              24744             
+qsort.riscv          BaselineConfig               218091             123506            
+qsort.riscv          EceProjectLRUConfig          173402             123506            
+qsort.riscv          EceProjectBIPConfig          173402             123506            
+qsort.riscv          EceProjectDIPConfig          173402             123506            
+spmv.riscv           BaselineConfig               ABORT/ERR          N/A               
+spmv.riscv           EceProjectLRUConfig          50254              34466             
+spmv.riscv           EceProjectBIPConfig          50254              34466             
+spmv.riscv           EceProjectDIPConfig          50254              34466             
+vvadd.riscv          BaselineConfig               3521               2416              
+vvadd.riscv          EceProjectLRUConfig          2476               2416              
+vvadd.riscv          EceProjectBIPConfig          2476               2416              
+vvadd.riscv          EceProjectDIPConfig          2476               2416              
+thrash               BaselineConfig               257256             71700             
+thrash               EceProjectLRUConfig          345977             71700             
+thrash               EceProjectBIPConfig          294444             71700             
+thrash               EceProjectDIPConfig          295993             71700             

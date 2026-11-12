@@ -1,0 +1,9 @@
+%Warning: System has stack size 8192 kb which may be too small; suggest 'ulimit -c 11431' or larger
+[UART] UART0 is here (stdin/stdout).
+*** FAILED *** (tohost = 1337)
+[2379695000] %Error: TestHarness.sv:99: Assertion failed in TOP.TestDriver.testHarness: Assertion failed: *** FAILED *** (exit code =       1337)
+
+    at SimTSI.scala:21 assert(!error, "*** FAILED *** (exit code = %%d)\n", exit >> 1.U)
+
+%Error: /workspace/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.BaselineConfig/gen-collateral/TestHarness.sv:99: Verilog $stop
+Aborting...

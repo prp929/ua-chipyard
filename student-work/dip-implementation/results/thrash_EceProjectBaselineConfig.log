@@ -1,0 +1,8 @@
+warning: tohost and fromhost symbols not in ELF; can't communicate with target
+%Warning: System has stack size 8192 kb which may be too small; suggest 'ulimit -c 12193' or larger
+[UART] UART0 is here (stdin/stdout).
+[905000] %Error: TLMonitor_61.sv:298: Assertion failed in TOP.TestDriver.testHarness.ram.buffer.monitor: Assertion failed: 'A' channel carries PutPartial type which is unexpected using diplomatic parameters (connected at generators/testchipip/src/main/scala/tsi/TSIHarness.scala:77:45)
+    at Monitor.scala:44 assert(cond, message)
+
+%Error: /workspace/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.EceProjectBaselineConfig/gen-collateral/TLMonitor_61.sv:298: Verilog $stop
+Aborting...
