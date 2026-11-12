@@ -1,0 +1,7 @@
+Microseconds for one run through Dhrystone: 449
+Dhrystones per Second:                      2222
+mcycle = 225027
+minstret = 186031
+%Warning: System has stack size 8192 kb which may be too small; suggest 'ulimit -c 12193' or larger
+[UART] UART0 is here (stdin/stdout).
+- /workspace/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.EceProjectLRUConfig/gen-collateral/TestDriver.v:158: Verilog $finish

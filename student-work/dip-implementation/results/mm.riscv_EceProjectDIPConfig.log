@@ -1,0 +1,8 @@
+C0: reg block 4x5x6, cache block 24x25x24
+C0: 24744 instructions
+C0: 25255 cycles
+C0: 28800 flops
+C0: 1140 Mflops @ 1 GHz
+%Warning: System has stack size 8192 kb which may be too small; suggest 'ulimit -c 12193' or larger
+[UART] UART0 is here (stdin/stdout).
+- /workspace/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.EceProjectDIPConfig/gen-collateral/TestDriver.v:158: Verilog $finish

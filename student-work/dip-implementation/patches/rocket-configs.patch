@@ -1,31 +1,46 @@
 diff --git a/generators/chipyard/src/main/scala/config/RocketConfigs.scala b/generators/chipyard/src/main/scala/config/RocketConfigs.scala
-index b0cea36c..378f7105 100644
+index b0cea36c..9aba7a58 100644
 --- a/generators/chipyard/src/main/scala/config/RocketConfigs.scala
 +++ b/generators/chipyard/src/main/scala/config/RocketConfigs.scala
-@@ -124,3 +124,26 @@ class AsyncResetRocketConfig extends Config(
+@@ -124,3 +124,41 @@ class AsyncResetRocketConfig extends Config(
      ("uncore", Seq("sbus", "mbus", "pbus", "fbus", "cbus", "obus", "implicit", "clock_tap"), Seq("tile")),
    ) ++
    new MulticlockRocketConfig)
 +
-+class EceProjectBaselineConfig extends Config(
++// Base L2 configuration helper (256 KB, 4 ways, 1 bank)
++class WithEceProjectL2 extends Config(
 +  new freechips.rocketchip.subsystem.WithInclusiveCache(nBanks = 1, nWays = 4, capacityKB = 256) ++
 +  new freechips.rocketchip.rocket.WithNHugeCores(1) ++
 +  new chipyard.config.AbstractConfig
 +)
 +
++// 1. Course Baseline (Deliberately minimal Rocket: no branch prediction, no FPU, no L2, 4 KiB direct-mapped L1s)
++class EceProjectCourseBaselineConfig extends Config(
++  new BaselineConfig
++)
++
++// 2. LRU: Rocket core + 256 KB 4-way L2 Inclusive Cache using TrueLRU
 +class EceProjectLRUConfig extends Config(
 +  new freechips.rocketchip.subsystem.WithInclusiveCacheLRU ++
-+  new EceProjectBaselineConfig
++  new WithEceProjectL2
 +)
 +
++// 3. BIP: Rocket core + 256 KB 4-way L2 Inclusive Cache using BIP
 +class EceProjectBIPConfig extends Config(
 +  new freechips.rocketchip.subsystem.WithInclusiveCacheBIP ++
-+  new EceProjectBaselineConfig
++  new WithEceProjectL2
 +)
 +
++// 4. DIP: Rocket core + 256 KB 4-way L2 Inclusive Cache using DIP with Set Dueling
 +class EceProjectDIPConfig extends Config(
 +  new freechips.rocketchip.subsystem.WithInclusiveCacheDIP ++
-+  new EceProjectBaselineConfig
++  new WithEceProjectL2
 +)
++
++// Backward compatibility alias: EceProjectBaselineConfig -> EceProjectDIPConfig
++class EceProjectBaselineConfig extends Config(
++  new EceProjectDIPConfig
++)
++
 +
 +

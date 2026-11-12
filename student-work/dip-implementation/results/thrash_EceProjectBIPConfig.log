@@ -1,0 +1,5 @@
+mcycle = 294444
+minstret = 71700
+%Warning: System has stack size 8192 kb which may be too small; suggest 'ulimit -c 12193' or larger
+[UART] UART0 is here (stdin/stdout).
+- /workspace/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.EceProjectBIPConfig/gen-collateral/TestDriver.v:158: Verilog $finish
